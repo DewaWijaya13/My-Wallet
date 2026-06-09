@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../controllers/auth_controller.dart';
 import '../controllers/profile_controller.dart';
 import '../models/user.dart';
+import '../database/database_helper.dart';
 
 class UserProvider extends ChangeNotifier {
   final AuthController _authController = AuthController();
@@ -10,6 +14,13 @@ class UserProvider extends ChangeNotifier {
   UserModel? _currentUser;
   bool _isLoading = false;
   String? _errorMessage;
+  
+  String _currency = 'IDR';
+  bool _useLiveConversion = false;
+  Map<String, double>? _exchangeRates;
+
+  bool _showCompactNumbers = true;
+  String _reminderTime = '08:00';
 
   UserModel? get currentUser => _currentUser;
   bool get isLoggedIn => _currentUser != null;
@@ -17,6 +28,11 @@ class UserProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   double get batasBudget => _currentUser?.batasBudget ?? 0;
   String get userId => _currentUser?.userId ?? '';
+  bool get showCompactNumbers => _showCompactNumbers;
+  String get reminderTime => _reminderTime;
+  
+  String get currency => _currency;
+  bool get useLiveConversion => _useLiveConversion;
 
   Future<bool> login(String email, String password) async {
     _isLoading = true;
@@ -25,11 +41,47 @@ class UserProvider extends ChangeNotifier {
 
     try {
       _currentUser = await _authController.login(email, password);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_id', _currentUser!.userId);
+
       _isLoading = false;
       notifyListeners();
       return true;
     } catch (e) {
       _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> loginWithGoogle() async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      final user = await _authController.loginWithGoogle();
+      if (user != null) {
+        _currentUser = user;
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('user_id', _currentUser!.userId);
+
+        _isLoading = false;
+        notifyListeners();
+        return true;
+      } else {
+        _errorMessage = null; // Canceled explicitly
+        _isLoading = false;
+        notifyListeners();
+        return false;
+      }
+    } catch (e) {
+      if (e.toString().toLowerCase().contains('canceled')) {
+        _errorMessage = null; // Ignore canceled exception
+      } else {
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      }
       _isLoading = false;
       notifyListeners();
       return false;
@@ -57,6 +109,9 @@ class UserProvider extends ChangeNotifier {
         tanggalLahir: tanggalLahir,
         jenisKelamin: jenisKelamin,
       );
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_id', _currentUser!.userId);
+
       _isLoading = false;
       notifyListeners();
       return true;
@@ -121,14 +176,99 @@ class UserProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void logout() {
+  Future<void> loadUser(String userId) async {
+    try {
+      final db = DatabaseHelper.instance;
+      _currentUser = await db.getUserById(userId);
+      
+      final prefs = await SharedPreferences.getInstance();
+      _currency = prefs.getString('currency') ?? 'IDR';
+      _useLiveConversion = prefs.getBool('use_live_conversion') ?? false;
+      _showCompactNumbers = prefs.getBool('show_compact_numbers') ?? true;
+      _reminderTime = prefs.getString('reminder_time') ?? '08:00';
+      
+      if (_useLiveConversion) {
+        await fetchExchangeRates();
+      }
+      
+      notifyListeners();
+    } catch (e) {
+      _errorMessage = e.toString();
+      notifyListeners();
+    }
+  }
+
+  Future<void> fetchExchangeRates() async {
+    try {
+      final response = await http.get(Uri.parse('https://open.er-api.com/v6/latest/IDR'));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['rates'] != null) {
+          _exchangeRates = Map<String, double>.from(data['rates'].map((key, value) => MapEntry(key, value.toDouble())));
+        }
+      }
+    } catch (_) {}
+  }
+
+  double convert(double amountInIdr) {
+    if (!_useLiveConversion || _currency == 'IDR' || _exchangeRates == null) return amountInIdr;
+    final rate = _exchangeRates![_currency] ?? 1.0;
+    return amountInIdr * rate;
+  }
+
+  Future<void> updateCurrency(String newCurrency) async {
+    _currency = newCurrency;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('currency', newCurrency);
+    notifyListeners();
+  }
+
+  Future<void> toggleLiveConversion(bool value) async {
+    _useLiveConversion = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('use_live_conversion', value);
+    if (value && _exchangeRates == null) {
+      await fetchExchangeRates();
+    }
+    notifyListeners();
+  }
+
+  Future<void> logout() async {
     _currentUser = null;
     _errorMessage = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('user_id');
     notifyListeners();
+  }
+
+  Future<void> deleteAccount() async {
+    if (_currentUser == null) return;
+    try {
+      final db = DatabaseHelper.instance;
+      await db.deleteAccount(_currentUser!.userId);
+      await logout();
+    } catch (e) {
+      _errorMessage = e.toString();
+      notifyListeners();
+    }
   }
 
   void clearError() {
     _errorMessage = null;
+    notifyListeners();
+  }
+
+  Future<void> toggleCompactNumbers(bool value) async {
+    _showCompactNumbers = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('show_compact_numbers', value);
+    notifyListeners();
+  }
+
+  Future<void> updateReminderTime(String newTime) async {
+    _reminderTime = newTime;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('reminder_time', newTime);
     notifyListeners();
   }
 }

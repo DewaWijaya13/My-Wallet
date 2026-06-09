@@ -4,6 +4,7 @@ class TransactionModel {
   final String trxId;
   String userId;
   int kategoriId;
+  String? walletId;
   String tipeTrx; // 'income' | 'expense'
   double nominal;
   DateTime tanggalTrx;
@@ -16,6 +17,7 @@ class TransactionModel {
     required this.trxId,
     required this.userId,
     required this.kategoriId,
+    this.walletId,
     required this.tipeTrx,
     required this.nominal,
     required this.tanggalTrx,
@@ -28,6 +30,7 @@ class TransactionModel {
       'trx_id': trxId,
       'user_id': userId,
       'kategori_id': kategoriId,
+      'wallet_id': walletId,
       'tipe_trx': tipeTrx,
       'nominal': nominal,
       'tanggal_trx': tanggalTrx.toIso8601String(),
@@ -51,6 +54,7 @@ class TransactionModel {
       trxId: map['trx_id'] as String,
       userId: map['user_id'] as String,
       kategoriId: map['kategori_id'] as int,
+      walletId: map['wallet_id'] as String?,
       tipeTrx: map['tipe_trx'] as String,
       nominal: (map['nominal'] as num).toDouble(),
       tanggalTrx: DateTime.parse(map['tanggal_trx'] as String),

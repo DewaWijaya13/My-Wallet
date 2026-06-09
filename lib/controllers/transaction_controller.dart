@@ -9,6 +9,7 @@ class TransactionController {
   Future<TransactionModel> addTransaction({
     required String userId,
     required int kategoriId,
+    String? walletId,
     required String tipeTrx,
     required double nominal,
     required DateTime tanggalTrx,
@@ -22,6 +23,7 @@ class TransactionController {
       trxId: _uuid.v4(),
       userId: userId,
       kategoriId: kategoriId,
+      walletId: walletId,
       tipeTrx: tipeTrx,
       nominal: nominal,
       tanggalTrx: tanggalTrx,

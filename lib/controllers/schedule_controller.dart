@@ -13,6 +13,7 @@ class ScheduleController {
     required double nominal,
     required DateTime tanggalJatuhTempo,
     bool isReminderActive = true,
+    String? catatan,
   }) async {
     if (nominal <= 0) {
       throw Exception('Nominal harus lebih dari 0');
@@ -29,6 +30,7 @@ class ScheduleController {
       nominal: nominal,
       tanggalJatuhTempo: tanggalJatuhTempo,
       isReminderActive: isReminderActive,
+      catatan: catatan,
     );
 
     await _db.insertSchedule(schedule);

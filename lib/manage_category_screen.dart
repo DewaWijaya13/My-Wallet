@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'providers/category_provider.dart';
-import 'models/category.dart';
+import 'add_category_bottom_sheet.dart';
 
 class ManageCategoryScreen extends StatelessWidget {
   const ManageCategoryScreen({super.key});
@@ -106,8 +106,11 @@ class ManageCategoryScreen extends StatelessWidget {
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Fitur tambah kategori segera hadir')),
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            backgroundColor: Colors.transparent,
+            builder: (context) => const AddCategoryBottomSheet(),
           );
         },
         backgroundColor: const Color(0xFF3366FF),

@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'providers/user_provider.dart';
@@ -7,6 +8,7 @@ import 'providers/category_provider.dart';
 import 'providers/transaction_provider.dart';
 import 'providers/schedule_provider.dart';
 import 'providers/report_provider.dart';
+import 'providers/wallet_provider.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'package:sqflite/sqflite.dart';
@@ -14,14 +16,35 @@ import 'database/database_helper.dart';
 import 'dashboard_screen.dart';
 import 'register_screen.dart';
 
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+import 'services/notification_service.dart';
+
+import 'package:google_sign_in/google_sign_in.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('id_ID', null);
   // Initialize web database factory (no web worker needed)
   if (kIsWeb) {
     databaseFactory = databaseFactoryFfiWebNoWebWorker;
   }
   // Initialize database
   await DatabaseHelper.instance.database;
+
+  // Initialize Firebase
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  // Initialize Notification Service
+  await NotificationService().init();
+
+  // Initialize Google Sign In
+  await GoogleSignIn.instance.initialize();
+
   runApp(const MyApp());
 }
 
@@ -37,10 +60,19 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => TransactionProvider()),
         ChangeNotifierProvider(create: (_) => ScheduleProvider()),
         ChangeNotifierProvider(create: (_) => ReportProvider()),
+        ChangeNotifierProvider(create: (_) => WalletProvider()),
       ],
       child: MaterialApp(
         title: 'My Wallet',
         debugShowCheckedModeBanner: false,
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [
+          Locale('id', 'ID'),
+        ],
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF5A44F3)),
           textTheme: GoogleFonts.poppinsTextTheme(Theme.of(context).textTheme),
@@ -63,11 +95,39 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(seconds: 2), () {
+    _checkLoginStatus();
+  }
+
+  Future<void> _checkLoginStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('user_id');
+
+    await Future.delayed(const Duration(seconds: 2));
+
+    if (!mounted) return;
+
+    if (userId != null && userId.isNotEmpty) {
+      // Auto-login
+      final userProvider = context.read<UserProvider>();
+      await userProvider.loadUser(userId);
+      
+      if (!mounted) return;
+      final now = DateTime.now();
+      await context.read<CategoryProvider>().loadCategories();
+      await context.read<TransactionProvider>().loadTransactions(userId);
+      await context.read<TransactionProvider>().loadMonthlySummary(userId, now.month, now.year);
+      await context.read<ScheduleProvider>().loadSchedules(userId);
+      
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const DashboardScreen()),
+      );
+    } else {
+      // Go to onboarding
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const OnboardingScreen()),
       );
-    });
+    }
   }
 
   @override
@@ -816,6 +876,71 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ),
                                   ],
                                 ),
+                        ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  // Google Login Button
+                  Consumer<UserProvider>(
+                    builder: (context, userProvider, _) {
+                      return SizedBox(
+                        width: double.infinity,
+                        height: 56,
+                        child: OutlinedButton(
+                          onPressed: userProvider.isLoading 
+                              ? null 
+                              : () async {
+                                  final success = await userProvider.loginWithGoogle();
+                                  if (success) {
+                                    if (!mounted) return;
+                                    // Load initial data for Dashboard
+                                    final userId = userProvider.userId;
+                                    final now = DateTime.now();
+                                    await context.read<CategoryProvider>().loadCategories();
+                                    await context.read<TransactionProvider>().loadTransactions(userId);
+                                    await context.read<TransactionProvider>().loadMonthlySummary(userId, now.month, now.year);
+                                    await context.read<ScheduleProvider>().loadSchedules(userId);
+                                    
+                                    if (!mounted) return;
+                                    Navigator.of(context).pushAndRemoveUntil(
+                                      MaterialPageRoute(builder: (_) => const DashboardScreen()),
+                                      (route) => false,
+                                    );
+                                  } else {
+                                    if (userProvider.errorMessage != null && userProvider.errorMessage!.isNotEmpty) {
+                                      _showSnackBar(userProvider.errorMessage!);
+                                    }
+                                  }
+                                },
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            side: BorderSide(color: Colors.grey.shade300),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(28),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Image.network(
+                                'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/120px-Google_%22G%22_logo.svg.png',
+                                height: 24,
+                              ),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  'Login dengan Google',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 16,
+                                    color: Colors.grey.shade700,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       );
                     },

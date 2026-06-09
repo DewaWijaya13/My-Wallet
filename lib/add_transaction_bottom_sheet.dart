@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'providers/transaction_provider.dart';
 import 'providers/user_provider.dart';
 import 'providers/category_provider.dart';
+import 'providers/wallet_provider.dart';
 import 'package:flutter/services.dart';
 
 class AddTransactionBottomSheet extends StatefulWidget {
@@ -16,10 +17,24 @@ class AddTransactionBottomSheet extends StatefulWidget {
 
 class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
   bool isPemasukan = false;
-  String selectedCategory = 'Edukasi';
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
   DateTime _selectedDate = DateTime.now();
+  int? _selectedCategoryId;
+  String? _selectedWalletId;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final walletProvider = context.read<WalletProvider>();
+      if (walletProvider.wallets.isNotEmpty) {
+        setState(() {
+          _selectedWalletId = walletProvider.activeWalletId ?? walletProvider.wallets.first.walletId;
+        });
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -27,17 +42,6 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
     _notesController.dispose();
     super.dispose();
   }
-
-  final List<Map<String, dynamic>> categories = [
-    {'name': 'Makanan', 'icon': Icons.restaurant, 'color': const Color(0xFF6EE7B7), 'iconColor': const Color(0xFF047857)},
-    {'name': 'Transportasi', 'icon': Icons.directions_car, 'color': const Color(0xFF93C5FD), 'iconColor': const Color(0xFF1D4ED8)},
-    {'name': 'Edukasi', 'icon': Icons.school, 'color': const Color(0xFFC4B5FD), 'iconColor': const Color(0xFF4338CA)},
-    {'name': 'Belanja', 'icon': Icons.shopping_bag, 'color': const Color(0xFFFCA5A5), 'iconColor': const Color(0xFFB91C1C)},
-    {'name': 'Hiburan', 'icon': Icons.movie, 'color': const Color(0xFFFDBA74), 'iconColor': const Color(0xFFC2410C)},
-    {'name': 'Kesehatan', 'icon': Icons.medical_services, 'color': const Color(0xFF86EFAC), 'iconColor': const Color(0xFF15803D)},
-    {'name': 'Tagihan', 'icon': Icons.receipt_long, 'color': const Color(0xFFBFDBFE), 'iconColor': const Color(0xFF1E40AF)},
-    {'name': 'Lainnya', 'icon': Icons.more_horiz, 'color': const Color(0xFFD6D3D1), 'iconColor': const Color(0xFF44403C)},
-  ];
 
   @override
   Widget build(BuildContext context) {
@@ -94,6 +98,47 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
                 ),
                 const SizedBox(height: 24),
 
+                // Wallet Selector
+                Consumer<WalletProvider>(
+                  builder: (context, walletProvider, _) {
+                    if (walletProvider.wallets.isEmpty) return const SizedBox();
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 24),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.grey.shade200),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedWalletId,
+                          isExpanded: true,
+                          hint: Text('Pilih Dompet', style: GoogleFonts.inter(color: Colors.grey.shade500)),
+                          icon: const Icon(Icons.keyboard_arrow_down, color: Colors.grey),
+                          onChanged: (String? newValue) {
+                            setState(() {
+                              _selectedWalletId = newValue;
+                            });
+                          },
+                          items: walletProvider.wallets.map((wallet) {
+                            return DropdownMenuItem<String>(
+                              value: wallet.walletId,
+                              child: Text(
+                                wallet.namaDompet,
+                                style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.black87,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+
                 // Toggle Pemasukan / Pengeluaran
                 Container(
                   padding: const EdgeInsets.all(4),
@@ -105,7 +150,10 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
                     children: [
                       Expanded(
                         child: GestureDetector(
-                          onTap: () => setState(() => isPemasukan = true),
+                          onTap: () => setState(() {
+                            isPemasukan = true;
+                            _selectedCategoryId = null;
+                          }),
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             decoration: BoxDecoration(
@@ -136,7 +184,10 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
                       ),
                       Expanded(
                         child: GestureDetector(
-                          onTap: () => setState(() => isPemasukan = false),
+                          onTap: () => setState(() {
+                            isPemasukan = false;
+                            _selectedCategoryId = null;
+                          }),
                           child: Container(
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             decoration: BoxDecoration(
@@ -198,25 +249,27 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    IntrinsicWidth(
-                      child: TextField(
-                        controller: _amountController,
-                        autofocus: true,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly,
-                          NumberTextInputFormatter(),
-                        ],
-                        style: GoogleFonts.inter(
-                          fontSize: 48,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                        decoration: const InputDecoration(
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding: EdgeInsets.zero,
-                          hintText: '0',
+                    Flexible(
+                      child: IntrinsicWidth(
+                        child: TextField(
+                          controller: _amountController,
+                          autofocus: true,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.digitsOnly,
+                            NumberTextInputFormatter(),
+                          ],
+                          style: GoogleFonts.inter(
+                            fontSize: 48,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                          ),
+                          decoration: const InputDecoration(
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.zero,
+                            hintText: '0',
+                          ),
                         ),
                       ),
                     ),
@@ -236,51 +289,67 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
                 const SizedBox(height: 16),
 
                 // Categories Grid
-                Wrap(
-                  spacing: 16,
-                  runSpacing: 20,
-                  alignment: WrapAlignment.spaceBetween,
-                  children: categories.map((cat) {
-                    final isSelected = selectedCategory == cat['name'];
-                    return GestureDetector(
-                      onTap: () => setState(() => selectedCategory = cat['name']),
-                      child: SizedBox(
-                        width: (MediaQuery.of(context).size.width - 48 - 48) / 4, // 4 items per row
-                        child: Column(
-                          children: [
-                            Container(
-                              width: 56,
-                              height: 56,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: cat['color'].withOpacity(0.4),
-                                border: isSelected
-                                    ? Border.all(color: const Color(0xFF8B5CF6), width: 2)
-                                    : null,
-                              ),
-                              child: Icon(
-                                cat['icon'],
-                                color: cat['iconColor'],
-                                size: 24,
-                              ),
+                Consumer<CategoryProvider>(
+                  builder: (context, catProvider, _) {
+                    final catList = isPemasukan ? catProvider.incomeCategories : catProvider.expenseCategories;
+                    return Wrap(
+                      spacing: 16,
+                      runSpacing: 20,
+                      alignment: WrapAlignment.spaceBetween,
+                      children: catList.map((cat) {
+                        final isSelected = _selectedCategoryId == cat.kategoriId;
+                        final iconData = CategoryProvider.getIconData(cat.ikon);
+                        final iconColor = Color(int.parse(cat.warna.replaceFirst('#', '0xFF')));
+                        
+                        return GestureDetector(
+                          onTap: () => setState(() => _selectedCategoryId = cat.kategoriId),
+                          child: SizedBox(
+                            width: (MediaQuery.of(context).size.width - 48 - 48) / 4,
+                            child: Column(
+                              children: [
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  width: 56,
+                                  height: 56,
+                                  decoration: BoxDecoration(
+                                    color: isSelected ? iconColor : iconColor.withOpacity(0.2),
+                                    shape: BoxShape.circle,
+                                    border: isSelected 
+                                      ? Border.all(color: iconColor, width: 2)
+                                      : null,
+                                    boxShadow: isSelected ? [
+                                      BoxShadow(
+                                        color: iconColor.withOpacity(0.3),
+                                        blurRadius: 12,
+                                        offset: const Offset(0, 4),
+                                      )
+                                    ] : null,
+                                  ),
+                                  child: Icon(
+                                    iconData,
+                                    color: isSelected ? Colors.white : iconColor,
+                                    size: 28,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  cat.namaKategori,
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                    color: isSelected ? iconColor : Colors.black87,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              cat['name'],
-                              style: GoogleFonts.inter(
-                                fontSize: 11,
-                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                                color: isSelected ? const Color(0xFF8B5CF6) : Colors.grey.shade600,
-                              ),
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
+                          ),
+                        );
+                      }).toList(),
                     );
-                  }).toList(),
+                  },
                 ),
                 const SizedBox(height: 32),
 
@@ -407,23 +476,21 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
                       final amountText = _amountController.text.replaceAll('.', '');
                       final amountVal = double.tryParse(amountText) ?? 0;
                       if (amountVal <= 0) return;
+                      
+                      if (_selectedCategoryId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Pilih kategori terlebih dahulu')),
+                        );
+                        return;
+                      }
 
                       final userId = context.read<UserProvider>().userId;
-                      if (userId != null) {
-                        // Find category ID
-                        final catProvider = context.read<CategoryProvider>();
-                        final catList = isPemasukan ? catProvider.incomeCategories : catProvider.expenseCategories;
-                        
-                        // Default to 1 (Makanan) or 9 (Gaji) if not found
-                        int catId = isPemasukan ? 9 : 1; 
-                        try {
-                          catId = catList.firstWhere((c) => c.namaKategori == selectedCategory).kategoriId!;
-                        } catch (_) {}
-
+                      if (userId.isNotEmpty) {
                         context.read<TransactionProvider>().addTransaction(
                           userId: userId,
+                          walletId: _selectedWalletId,
                           tipeTrx: isPemasukan ? 'income' : 'expense',
-                          kategoriId: catId,
+                          kategoriId: _selectedCategoryId!,
                           nominal: amountVal,
                           tanggalTrx: _selectedDate,
                           catatan: _notesController.text,

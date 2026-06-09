@@ -8,6 +8,7 @@ class ScheduleModel {
   double nominal;
   DateTime tanggalJatuhTempo;
   bool isReminderActive;
+  String? catatan;
 
   // Joined relation (optional, for display)
   CategoryModel? category;
@@ -20,6 +21,7 @@ class ScheduleModel {
     required this.nominal,
     required this.tanggalJatuhTempo,
     this.isReminderActive = true,
+    this.catatan,
     this.category,
   });
 
@@ -32,6 +34,7 @@ class ScheduleModel {
       'nominal': nominal,
       'tanggal_jatuh_tempo': tanggalJatuhTempo.toIso8601String(),
       'is_reminder_active': isReminderActive ? 1 : 0,
+      'catatan': catatan,
     };
   }
 
@@ -55,6 +58,7 @@ class ScheduleModel {
       nominal: (map['nominal'] as num).toDouble(),
       tanggalJatuhTempo: DateTime.parse(map['tanggal_jatuh_tempo'] as String),
       isReminderActive: (map['is_reminder_active'] as int) == 1,
+      catatan: map['catatan'] as String?,
       category: cat,
     );
   }

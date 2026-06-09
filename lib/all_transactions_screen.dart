@@ -4,12 +4,14 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'providers/transaction_provider.dart';
 import 'providers/user_provider.dart';
+import 'providers/category_provider.dart';
 
 class AllTransactionsScreen extends StatelessWidget {
   const AllTransactionsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    context.watch<UserProvider>();
     return Scaffold(
       backgroundColor: const Color(0xFFFAFAFC),
       appBar: AppBar(
@@ -49,26 +51,27 @@ class AllTransactionsScreen extends StatelessWidget {
               final trx = provider.transactions[index];
               final isPemasukan = trx.tipeTrx == 'income';
               
-              IconData icon = Icons.receipt_long;
-              Color iconColor = const Color(0xFF7C3AED);
-              Color bgColor = const Color(0xFFF3E8FF);
+              IconData icon;
+              Color iconColor;
+              Color bgColor;
 
-              if (trx.category?.namaKategori == 'Makanan') {
-                icon = Icons.restaurant;
-                iconColor = const Color(0xFFE87A3E);
-                bgColor = const Color(0xFFFCEFE8);
-              } else if (trx.category?.namaKategori == 'Transportasi') {
-                icon = Icons.directions_car;
-                iconColor = const Color(0xFF3B82F6);
-                bgColor = const Color(0xFFEBF8FF);
+              final cat = trx.category;
+              if (cat != null && cat.ikon.isNotEmpty) {
+                icon = CategoryProvider.getIconData(cat.ikon);
+                iconColor = CategoryProvider.parseColor(cat.warna);
+                bgColor = CategoryProvider.parseColor(cat.warna).withOpacity(0.15);
               } else if (isPemasukan) {
                 icon = Icons.account_balance;
                 iconColor = const Color(0xFF10B981);
                 bgColor = const Color(0xFFE1F5E9);
+              } else {
+                icon = Icons.receipt_long;
+                iconColor = const Color(0xFF7C3AED);
+                bgColor = const Color(0xFFF3E8FF);
               }
 
               return Dismissible(
-                key: Key(trx.trxId ?? index.toString()),
+                key: Key(trx.trxId),
                 direction: DismissDirection.endToStart,
                 background: Container(
                   margin: const EdgeInsets.only(bottom: 16),
@@ -82,8 +85,8 @@ class AllTransactionsScreen extends StatelessWidget {
                 ),
                 onDismissed: (direction) {
                   final userId = context.read<UserProvider>().userId;
-                  if (userId != null && trx.trxId != null) {
-                    context.read<TransactionProvider>().deleteTransaction(trx.trxId!, userId);
+                  if (userId != null) {
+                    context.read<TransactionProvider>().deleteTransaction(trx.trxId, userId);
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('Transaksi dihapus')),
                     );
@@ -119,13 +122,26 @@ class AllTransactionsScreen extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              trx.catatan?.isNotEmpty == true ? trx.catatan! : (trx.category?.namaKategori ?? 'Lainnya'),
+                              trx.category?.namaKategori ?? 'Lainnya',
                               style: GoogleFonts.inter(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
                                 color: Colors.black87,
                               ),
                             ),
+                            if (trx.catatan != null && trx.catatan!.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                trx.catatan!,
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade600,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            ],
                             const SizedBox(height: 4),
                             Text(
                               DateFormat('dd MMM yyyy, HH:mm').format(trx.tanggalTrx),
@@ -137,13 +153,24 @@ class AllTransactionsScreen extends StatelessWidget {
                           ],
                         ),
                       ),
-                      Text(
-                        '${isPemasukan ? '+' : '-'}Rp ${NumberFormat.currency(locale: 'id', symbol: '', decimalDigits: 0).format(trx.nominal)}',
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: isPemasukan ? const Color(0xFF10B981) : Colors.black87,
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Consumer<UserProvider>(
+                            builder: (context, userProvider, _) {
+                              final nominal = userProvider.convert(trx.nominal);
+                              final symbol = userProvider.currency == 'IDR' ? 'Rp ' : '${userProvider.currency} ';
+                              return Text(
+                                '${isPemasukan ? '+' : '-'}$symbol${NumberFormat.currency(locale: 'id', symbol: '', decimalDigits: 0).format(nominal)}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: isPemasukan ? const Color(0xFF10B981) : Colors.black87,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
                       ),
                     ],
                   ),

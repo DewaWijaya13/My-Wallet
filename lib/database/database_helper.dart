@@ -1,5 +1,4 @@
 import 'package:sqflite/sqflite.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import '../models/user.dart';
 import '../models/category.dart';
 import '../models/transaction.dart';
@@ -22,7 +21,7 @@ class DatabaseHelper {
     // On web, just use the filename directly
     return await openDatabase(
       filePath,
-      version: 2,
+      version: 4,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -31,6 +30,29 @@ class DatabaseHelper {
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute('ALTER TABLE users ADD COLUMN foto_profil TEXT');
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE schedules ADD COLUMN catatan TEXT');
+    }
+    if (oldVersion < 4) {
+      await db.execute('''
+        CREATE TABLE wallets (
+          wallet_id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          nama_dompet TEXT NOT NULL,
+          deskripsi TEXT,
+          warna TEXT NOT NULL,
+          ikon TEXT NOT NULL,
+          saldo_awal REAL DEFAULT 0,
+          tanggal_dibuat TEXT NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+      ''');
+      await db.execute('ALTER TABLE transactions ADD COLUMN wallet_id TEXT');
+      
+      // We will initialize the default wallet for existing users when they login, 
+      // or we can do it here by fetching all users.
+      // Doing it dynamically in app is easier (if user has 0 wallets, create one).
     }
   }
 
@@ -67,12 +89,28 @@ class DatabaseHelper {
         trx_id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         kategori_id INTEGER NOT NULL,
+        wallet_id TEXT,
         tipe_trx TEXT NOT NULL,
         nominal REAL NOT NULL,
         tanggal_trx TEXT NOT NULL,
         catatan TEXT,
         FOREIGN KEY (user_id) REFERENCES users(user_id),
         FOREIGN KEY (kategori_id) REFERENCES categories(kategori_id)
+      )
+    ''');
+
+    // WALLETS table
+    await db.execute('''
+      CREATE TABLE wallets (
+        wallet_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        nama_dompet TEXT NOT NULL,
+        deskripsi TEXT,
+        warna TEXT NOT NULL,
+        ikon TEXT NOT NULL,
+        saldo_awal REAL DEFAULT 0,
+        tanggal_dibuat TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(user_id)
       )
     ''');
 
@@ -99,6 +137,7 @@ class DatabaseHelper {
         nominal REAL NOT NULL,
         tanggal_jatuh_tempo TEXT NOT NULL,
         is_reminder_active INTEGER DEFAULT 1,
+        catatan TEXT,
         FOREIGN KEY (user_id) REFERENCES users(user_id),
         FOREIGN KEY (kategori_id) REFERENCES categories(kategori_id)
       )
@@ -369,6 +408,12 @@ class DatabaseHelper {
     await db.delete('transactions', where: 'user_id = ?', whereArgs: [userId]);
     await db.delete('schedules', where: 'user_id = ?', whereArgs: [userId]);
     await db.delete('report_histories', where: 'user_id = ?', whereArgs: [userId]);
+  }
+
+  Future<void> deleteAccount(String userId) async {
+    final db = await database;
+    await deleteAllUserData(userId);
+    await db.delete('users', where: 'user_id = ?', whereArgs: [userId]);
   }
 
   Future<void> close() async {

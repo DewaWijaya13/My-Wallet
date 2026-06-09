@@ -4,9 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'providers/schedule_provider.dart';
 import 'providers/user_provider.dart';
+import 'providers/category_provider.dart';
+import 'models/schedule.dart';
 
 class AddScheduleScreen extends StatefulWidget {
-  const AddScheduleScreen({super.key});
+  final ScheduleModel? existingSchedule;
+  const AddScheduleScreen({super.key, this.existingSchedule});
 
   @override
   State<AddScheduleScreen> createState() => _AddScheduleScreenState();
@@ -18,7 +21,21 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
   DateTime _selectedDate = DateTime.now();
-  String _selectedCategory = 'Tagihan';
+  int? _selectedCategoryId;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.existingSchedule != null) {
+      final s = widget.existingSchedule!;
+      _amountController.text = s.nominal.toInt().toString();
+      _titleController.text = s.namaTagihan;
+      _notesController.text = s.catatan ?? '';
+      _selectedDate = s.tanggalJatuhTempo;
+      _isReminderOn = s.isReminderActive;
+      _selectedCategoryId = s.kategoriId;
+    }
+  }
 
   @override
   void dispose() {
@@ -155,26 +172,20 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                   const SizedBox(height: 20),
 
                   _buildFormLabel('KATEGORI'),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _buildCategoryChip(Icons.home_outlined, 'Rumah'),
-                      _buildCategoryChip(Icons.receipt_long_outlined, 'Tagihan'),
-                      _buildCategoryChip(Icons.credit_card_outlined, 'Cicilan'),
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF3F4F6),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Icon(
-                          Icons.add,
-                          size: 18,
-                          color: Colors.black54,
-                        ),
-                      ),
-                    ],
+                  Consumer<CategoryProvider>(
+                    builder: (context, catProvider, _) {
+                      return Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: catProvider.categories.map((cat) {
+                          return _buildCategoryChip(
+                            CategoryProvider.getIconData(cat.ikon),
+                            cat.namaKategori,
+                            cat.kategoriId!,
+                          );
+                        }).toList(),
+                      );
+                    },
                   ),
                   const SizedBox(height: 32),
 
@@ -258,20 +269,42 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                   onPressed: () {
                     final amountVal = double.tryParse(_amountController.text) ?? 0;
                     final title = _titleController.text.trim();
+                    final notes = _notesController.text.trim();
                     if (amountVal <= 0 || title.isEmpty) return;
+
+                    if (_selectedCategoryId == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Pilih kategori terlebih dahulu')),
+                      );
+                      return;
+                    }
 
                     final userId = context.read<UserProvider>().userId;
                     if (userId != null) {
-                      context.read<ScheduleProvider>().addSchedule(
-                        userId: userId,
-                        namaTagihan: title,
-                        kategoriId: 1, // Just dummy for now
-                        tanggalJatuhTempo: _selectedDate,
-                        isReminderActive: _isReminderOn,
-                        nominal: amountVal,
-                      ).then((_) {
-                        Navigator.pop(context);
-                      });
+                      if (widget.existingSchedule != null) {
+                        final updated = widget.existingSchedule!;
+                        updated.namaTagihan = title;
+                        updated.kategoriId = _selectedCategoryId!;
+                        updated.tanggalJatuhTempo = _selectedDate;
+                        updated.isReminderActive = _isReminderOn;
+                        updated.nominal = amountVal;
+                        updated.catatan = notes;
+                        context.read<ScheduleProvider>().updateSchedule(updated, userId).then((_) {
+                          Navigator.pop(context);
+                        });
+                      } else {
+                        context.read<ScheduleProvider>().addSchedule(
+                          userId: userId,
+                          namaTagihan: title,
+                          kategoriId: _selectedCategoryId!,
+                          tanggalJatuhTempo: _selectedDate,
+                          isReminderActive: _isReminderOn,
+                          nominal: amountVal,
+                          catatan: notes,
+                        ).then((_) {
+                          Navigator.pop(context);
+                        });
+                      }
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -392,16 +425,16 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
     );
   }
 
-  Widget _buildCategoryChip(IconData icon, String label) {
-    final isSelected = _selectedCategory == label;
+  Widget _buildCategoryChip(IconData icon, String label, int categoryId) {
+    final isSelected = _selectedCategoryId == categoryId;
     return GestureDetector(
-      onTap: () => setState(() => _selectedCategory = label),
+      onTap: () => setState(() => _selectedCategoryId = categoryId),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected
               ? const Color(0xFFE0E7FF)
-              : const Color(0xFFF3F4F6), // light blue vs light gray
+              : const Color(0xFFF3F4F6),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(

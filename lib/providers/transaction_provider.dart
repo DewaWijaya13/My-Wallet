@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../controllers/transaction_controller.dart';
 import '../database/database_helper.dart';
 import '../models/transaction.dart';
-import '../models/category.dart';
 
 class TransactionProvider extends ChangeNotifier {
   final TransactionController _controller = TransactionController();
@@ -24,6 +23,35 @@ class TransactionProvider extends ChangeNotifier {
   Map<int, double> get expenseByCategory => _expenseByCategory;
   bool get isLoading => _isLoading;
 
+  double getBalanceForWallet(String walletId, double saldoAwal) {
+    double inc = 0;
+    double exp = 0;
+    for (var t in _transactions.where((trx) => trx.walletId == walletId)) {
+      if (t.tipeTrx == 'income') {
+        inc += t.nominal;
+      } else {
+        exp += t.nominal;
+      }
+    }
+    return saldoAwal + inc - exp;
+  }
+
+  double getIncomeForWallet(String walletId) {
+    return _transactions
+        .where((trx) => trx.walletId == walletId && trx.tipeTrx == 'income')
+        .fold(0.0, (sum, trx) => sum + trx.nominal);
+  }
+
+  double getExpenseForWallet(String walletId) {
+    return _transactions
+        .where((trx) => trx.walletId == walletId && trx.tipeTrx == 'expense')
+        .fold(0.0, (sum, trx) => sum + trx.nominal);
+  }
+
+  List<TransactionModel> getRecentTransactionsForWallet(String walletId) {
+    return _recentTransactions.where((trx) => trx.walletId == walletId).toList();
+  }
+
   Future<void> loadTransactions(String userId) async {
     _isLoading = true;
     notifyListeners();
@@ -32,6 +60,31 @@ class TransactionProvider extends ChangeNotifier {
     _recentTransactions = await _controller.getRecentTransactions(userId, limit: 5);
     _isLoading = false;
     notifyListeners();
+  }
+
+  List<TransactionModel> getTransactionsForPeriod(DateTime startDate, DateTime endDate) {
+    return _transactions.where((t) {
+      return t.tanggalTrx.isAfter(startDate.subtract(const Duration(seconds: 1))) && 
+             t.tanggalTrx.isBefore(endDate.add(const Duration(days: 1)));
+    }).toList();
+  }
+
+  double getInitialBalanceBefore(DateTime date, {String? walletId}) {
+    double inc = 0;
+    double exp = 0;
+    for (var t in _transactions) {
+      if (walletId != null && t.walletId != walletId) continue;
+      
+      // Exclude time component for correct start of day check, or just use isBefore
+      if (t.tanggalTrx.isBefore(DateTime(date.year, date.month, date.day))) {
+        if (t.tipeTrx == 'income') {
+          inc += t.nominal;
+        } else {
+          exp += t.nominal;
+        }
+      }
+    }
+    return inc - exp;
   }
 
   Future<void> loadMonthlySummary(String userId, int month, int year) async {
@@ -47,6 +100,7 @@ class TransactionProvider extends ChangeNotifier {
   Future<bool> addTransaction({
     required String userId,
     required int kategoriId,
+    String? walletId,
     required String tipeTrx,
     required double nominal,
     required DateTime tanggalTrx,
@@ -56,6 +110,7 @@ class TransactionProvider extends ChangeNotifier {
       await _controller.addTransaction(
         userId: userId,
         kategoriId: kategoriId,
+        walletId: walletId,
         tipeTrx: tipeTrx,
         nominal: nominal,
         tanggalTrx: tanggalTrx,
@@ -73,6 +128,10 @@ class TransactionProvider extends ChangeNotifier {
   }
 
   Future<void> deleteTransaction(String trxId, String userId) async {
+    _transactions.removeWhere((t) => t.trxId == trxId);
+    _recentTransactions.removeWhere((t) => t.trxId == trxId);
+    notifyListeners();
+    
     await _controller.deleteTransaction(trxId);
     await loadTransactions(userId);
     final now = DateTime.now();
