@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/profile_controller.dart';
 import '../models/user.dart';
 import '../database/database_helper.dart';
+import '../services/cloud_sync_service.dart';
 
 class UserProvider extends ChangeNotifier {
   final AuthController _authController = AuthController();
@@ -21,6 +23,7 @@ class UserProvider extends ChangeNotifier {
 
   bool _showCompactNumbers = true;
   String _reminderTime = '08:00';
+  bool _hasUnreadNotifications = false;
 
   UserModel? get currentUser => _currentUser;
   bool get isLoggedIn => _currentUser != null;
@@ -30,9 +33,15 @@ class UserProvider extends ChangeNotifier {
   String get userId => _currentUser?.userId ?? '';
   bool get showCompactNumbers => _showCompactNumbers;
   String get reminderTime => _reminderTime;
+  bool get hasUnreadNotifications => _hasUnreadNotifications;
   
   String get currency => _currency;
   bool get useLiveConversion => _useLiveConversion;
+
+  void setHasUnreadNotifications(bool value) {
+    _hasUnreadNotifications = value;
+    notifyListeners();
+  }
 
   Future<bool> login(String email, String password) async {
     _isLoading = true;
@@ -44,11 +53,25 @@ class UserProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_id', _currentUser!.userId);
 
+      // -- AUTO RESTORE CLOUD SYNC --
+      try {
+        final cloudSync = CloudSyncService();
+        await cloudSync.restoreFromCloud(_currentUser!.userId);
+        
+        // Re-fetch user in case local DB was updated from Cloud
+        final db = DatabaseHelper.instance;
+        _currentUser = await db.getUserByEmail(email) ?? _currentUser;
+      } catch (_) {}
+
       _isLoading = false;
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      if (e.toString().contains('unverified_email')) {
+        _errorMessage = 'Email belum diverifikasi. Silakan cek kotak masuk email Anda.';
+      } else {
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      }
       _isLoading = false;
       notifyListeners();
       return false;
@@ -67,8 +90,14 @@ class UserProvider extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('user_id', _currentUser!.userId);
 
+        // -- AUTO RESTORE CLOUD SYNC --
+        // Check and pull backup from cloud if any
+        try {
+          final cloudSync = CloudSyncService();
+          await cloudSync.restoreFromCloud(_currentUser!.userId);
+        } catch (_) {}
+
         _isLoading = false;
-        notifyListeners();
         return true;
       } else {
         _errorMessage = null; // Canceled explicitly
@@ -88,10 +117,43 @@ class UserProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> register({
+  Future<String?> sendVerificationEmail(String email) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+    try {
+      final tempPassword = await _authController.sendEmailVerificationLink(email);
+      _errorMessage = 'Tautan verifikasi telah dikirim. Silakan cek email Anda.';
+      _isLoading = false;
+      notifyListeners();
+      return tempPassword;
+    } catch (e) {
+      _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      _isLoading = false;
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<bool> checkEmailVerified(String email, String tempPassword) async {
+    _isLoading = true;
+    notifyListeners();
+    final verified = await _authController.isEmailVerified(email, tempPassword);
+    if (!verified) {
+      _errorMessage = 'Email belum terverifikasi.';
+    } else {
+      _errorMessage = null;
+    }
+    _isLoading = false;
+    notifyListeners();
+    return verified;
+  }
+
+  Future<bool> finalizeRegistration({
     required String namaLengkap,
     required String email,
-    required String password,
+    required String tempPassword,
+    required String realPassword,
     String? noHp,
     DateTime? tanggalLahir,
     String? jenisKelamin,
@@ -101,17 +163,45 @@ class UserProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _currentUser = await _authController.register(
+      _currentUser = await _authController.finalizeRegistration(
         namaLengkap: namaLengkap,
         email: email,
-        password: password,
+        tempPassword: tempPassword,
+        realPassword: realPassword,
         noHp: noHp,
         tanggalLahir: tanggalLahir,
         jenisKelamin: jenisKelamin,
       );
+      
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user_id', _currentUser!.userId);
 
+      // Trigger cloud sync upload immediately for new profile
+      try {
+        final cloudSync = CloudSyncService();
+        await cloudSync.backupToCloud(_currentUser!.userId);
+      } catch (_) {}
+
+      _isLoading = false;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = e.toString().replaceFirst('Exception: ', '');
+      _isLoading = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> forgotPassword(String email) async {
+    _isLoading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      
+      _errorMessage = 'Tautan reset sandi telah dikirim ke email Anda.';
       _isLoading = false;
       notifyListeners();
       return true;
@@ -191,6 +281,12 @@ class UserProvider extends ChangeNotifier {
         await fetchExchangeRates();
       }
       
+      // -- AUTO CLOUD SYNC ON START --
+      try {
+        final cloudSync = CloudSyncService();
+        cloudSync.backupToCloud(userId);
+      } catch (_) {}
+
       notifyListeners();
     } catch (e) {
       _errorMessage = e.toString();

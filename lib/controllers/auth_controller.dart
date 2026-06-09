@@ -16,47 +16,137 @@ class AuthController {
     return digest.toString();
   }
 
-  Future<UserModel?> register({
+  Future<String> sendEmailVerificationLink(String email) async {
+    try {
+      final tempPassword = 'Temp#${DateTime.now().millisecondsSinceEpoch}';
+      final UserCredential userCredential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(email: email, password: tempPassword);
+
+      final User? firebaseUser = userCredential.user;
+      if (firebaseUser != null) {
+        await firebaseUser.sendEmailVerification();
+        return tempPassword;
+      }
+      throw Exception('Gagal membuat akun sementara Firebase');
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        throw Exception('Email sudah terdaftar. Silakan gunakan email lain atau Login.');
+      } else if (e.code == 'invalid-email') {
+        throw Exception('Format email tidak valid.');
+      }
+      throw Exception(e.message ?? 'Terjadi kesalahan saat verifikasi.');
+    } catch (e) {
+      throw Exception(e.toString());
+    }
+  }
+
+  Future<bool> isEmailVerified(String email, String tempPassword) async {
+    try {
+      final UserCredential userCredential = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: tempPassword);
+      
+      final User? firebaseUser = userCredential.user;
+      if (firebaseUser != null) {
+        await firebaseUser.reload();
+        return FirebaseAuth.instance.currentUser?.emailVerified ?? false;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<UserModel?> finalizeRegistration({
     required String namaLengkap,
     required String email,
-    required String password,
+    required String tempPassword,
+    required String realPassword,
     String? noHp,
     DateTime? tanggalLahir,
     String? jenisKelamin,
   }) async {
-    // Check if email already exists
-    final existing = await _db.getUserByEmail(email);
-    if (existing != null) {
-      throw Exception('Email sudah terdaftar');
+    try {
+      // 1. Sign in with temp password
+      final UserCredential userCredential = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: tempPassword);
+
+      final User? firebaseUser = userCredential.user;
+      
+      if (firebaseUser != null) {
+        if (!firebaseUser.emailVerified) {
+          throw Exception('Email belum diverifikasi');
+        }
+
+        // 2. Update to real password
+        await firebaseUser.updatePassword(realPassword);
+
+        // 3. Save to SQLite using Firebase UID
+        final user = UserModel(
+          userId: firebaseUser.uid,
+          namaLengkap: namaLengkap,
+          email: email,
+          passwordHash: hashPassword(realPassword), // still hash for local reference
+          noHp: noHp,
+          tanggalLahir: tanggalLahir,
+          jenisKelamin: jenisKelamin,
+          batasBudget: 1600000, // Default budget
+        );
+
+        await _db.insertUser(user);
+        return user;
+      }
+      throw Exception('Gagal menyelesaikan pembuatan akun');
+    } catch (e) {
+      throw Exception(e.toString());
     }
-
-    final user = UserModel(
-      userId: _uuid.v4(),
-      namaLengkap: namaLengkap,
-      email: email,
-      passwordHash: hashPassword(password),
-      noHp: noHp,
-      tanggalLahir: tanggalLahir,
-      jenisKelamin: jenisKelamin,
-      batasBudget: 1600000, // Default budget
-    );
-
-    await _db.insertUser(user);
-    return user;
   }
 
   Future<UserModel?> login(String email, String password) async {
-    final user = await _db.getUserByEmail(email);
-    if (user == null) {
-      throw Exception('Email tidak ditemukan');
-    }
+    try {
+      // 1. Sign in with Firebase Auth
+      final UserCredential userCredential = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: password);
 
-    final passwordHash = hashPassword(password);
-    if (user.passwordHash != passwordHash) {
-      throw Exception('Password salah');
-    }
+      final User? firebaseUser = userCredential.user;
 
-    return user;
+      if (firebaseUser != null) {
+        // Check if email is verified
+        if (!firebaseUser.emailVerified) {
+          throw Exception('unverified_email');
+        }
+
+        // 2. Get user from local DB using UID or Email
+        UserModel? user = await _db.getUserByEmail(email);
+        
+        // If not found in local DB, it means they might be logging in from a new device!
+        // We will return a temporary UserModel just to pass the UI logic,
+        // The UserProvider will handle the CloudSyncRestore and re-fetch!
+        if (user == null) {
+          user = UserModel(
+            userId: firebaseUser.uid,
+            namaLengkap: firebaseUser.displayName ?? 'Pengguna',
+            email: email,
+            passwordHash: '',
+            batasBudget: 1600000,
+          );
+        }
+
+        return user;
+      }
+      throw Exception('Gagal masuk.');
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'user-not-found' || e.code == 'invalid-credential' || e.code == 'invalid-email') {
+        throw Exception('Email belum terdaftar atau salah.');
+      } else if (e.code == 'wrong-password') {
+        throw Exception('Sandi salah.');
+      }
+      throw Exception(e.message ?? 'Terjadi kesalahan saat masuk.');
+    } catch (e) {
+      if (e.toString() == 'Exception: unverified_email') {
+        rethrow;
+      }
+      throw Exception(e.toString());
+    }
   }
 
   Future<UserModel?> loginWithGoogle() async {

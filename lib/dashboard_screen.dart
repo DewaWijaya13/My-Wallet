@@ -57,10 +57,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await walletProvider.loadWallets(userProvider.userId);
     
     if (walletProvider.wallets.isEmpty && mounted) {
-      Navigator.push(
+      await Navigator.push(
         context,
         MaterialPageRoute(builder: (context) => const ManageWalletScreen(isInitial: true)),
       );
+      
+      // Check again after returning
+      await walletProvider.loadWallets(userProvider.userId);
+      if (walletProvider.wallets.isEmpty && mounted) {
+        // User refused to create a wallet, log them out and send to Login
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('user_id');
+        if (mounted) {
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const LoginScreen()),
+            (route) => false,
+          );
+        }
+      }
     }
   }
 
@@ -77,6 +91,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {
       _isNotificationEnabled = value;
     });
+  }
+
+  IconData _getIconData(String iconName) {
+    switch (iconName) {
+      case 'account_balance': return Icons.account_balance;
+      case 'credit_card': return Icons.credit_card;
+      case 'savings': return Icons.savings;
+      default: return Icons.account_balance_wallet;
+    }
   }
 
   Map<String, dynamic> _getReportData(List<TransactionModel> transactions) {
@@ -348,7 +371,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
               GestureDetector(
-                onTap: () => _showNotificationBottomSheet(context),
+                onTap: () {
+                  context.read<UserProvider>().setHasUnreadNotifications(false);
+                  _showNotificationBottomSheet(context);
+                },
                 child: Stack(
                   children: [
                     const Icon(
@@ -356,19 +382,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       color: Color(0xFF3366FF),
                       size: 28,
                     ),
-                    Positioned(
-                      top: 2,
-                      right: 2,
-                      child: Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0xFFFAFAFC), width: 2),
+                    if (context.watch<UserProvider>().hasUnreadNotifications)
+                      Positioned(
+                        top: 2,
+                        right: 2,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: const Color(0xFFFAFAFC), width: 2),
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ),
               ),
@@ -439,7 +466,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     
                     return Container(
                       margin: const EdgeInsets.symmetric(horizontal: 4.0),
-                      padding: const EdgeInsets.all(24.0),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           colors: [walletColor, walletColor.withOpacity(0.7)],
@@ -455,78 +481,99 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           ),
                         ],
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                wallet.namaDompet.toUpperCase(),
-                                style: GoogleFonts.inter(
-                                  color: Colors.white.withOpacity(0.8),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  letterSpacing: 1.0,
-                                ),
-                              ),
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(builder: (context) => ManageWalletScreen(wallet: wallet)),
-                                  );
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: const Icon(
-                                    Icons.edit,
-                                    color: Colors.white,
-                                    size: 16,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              _formatCompactCurrency(balance),
-                              style: GoogleFonts.poppins(
-                                color: Colors.white,
-                                fontSize: 36,
-                                fontWeight: FontWeight.bold,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(24),
+                        child: Stack(
+                          children: [
+                            // Background Icon Watermark
+                            Positioned(
+                              right: -30,
+                              bottom: -20,
+                              child: Icon(
+                                _getIconData(wallet.ikon),
+                                size: 160,
+                                color: Colors.white.withOpacity(0.15),
                               ),
                             ),
-                          ),
-                          const Spacer(),
-                          Row(
-                            children: [
-                              _buildBalancePill(
-                                icon: Icons.arrow_downward,
-                                iconColor: Colors.green,
-                                label: 'Income',
-                                amount: _formatCompactCurrency(income),
+                            // Foreground Content
+                            Padding(
+                              padding: const EdgeInsets.all(24.0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        wallet.namaDompet.toUpperCase(),
+                                        style: GoogleFonts.inter(
+                                          color: Colors.white.withOpacity(0.8),
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                          letterSpacing: 1.0,
+                                        ),
+                                      ),
+                                      GestureDetector(
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(builder: (context) => ManageWalletScreen(wallet: wallet)),
+                                          );
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withOpacity(0.2),
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: const Icon(
+                                            Icons.edit,
+                                            color: Colors.white,
+                                            size: 16,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    alignment: Alignment.centerLeft,
+                                    child: Text(
+                                      _formatCompactCurrency(balance),
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.white,
+                                        fontSize: 36,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Row(
+                                    children: [
+                                      _buildBalancePill(
+                                        icon: Icons.arrow_downward,
+                                        iconColor: Colors.green,
+                                        label: 'Income',
+                                        amount: _formatCompactCurrency(income),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      _buildBalancePill(
+                                        icon: Icons.arrow_upward,
+                                        iconColor: Colors.red,
+                                        label: 'Expense',
+                                        amount: _formatCompactCurrency(expense),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 12),
-                              _buildBalancePill(
-                                icon: Icons.arrow_upward,
-                                iconColor: Colors.red,
-                                label: 'Expense',
-                                amount: _formatCompactCurrency(expense),
-                              ),
-                            ],
-                          ),
-                        ],
+                            ),
+                          ],
+                        ),
                       ),
                     );
                   },

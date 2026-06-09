@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../controllers/transaction_controller.dart';
 import '../database/database_helper.dart';
 import '../models/transaction.dart';
+import '../services/cloud_sync_service.dart';
 
 class TransactionProvider extends ChangeNotifier {
   final TransactionController _controller = TransactionController();
@@ -121,6 +122,10 @@ class TransactionProvider extends ChangeNotifier {
       await loadTransactions(userId);
       final now = DateTime.now();
       await loadMonthlySummary(userId, now.month, now.year);
+
+      // -- CLOUD SYNC --
+      CloudSyncService().backupToCloud(userId);
+
       return true;
     } catch (e) {
       return false;
@@ -136,5 +141,8 @@ class TransactionProvider extends ChangeNotifier {
     await loadTransactions(userId);
     final now = DateTime.now();
     await loadMonthlySummary(userId, now.month, now.year);
+
+    // -- CLOUD SYNC --
+    CloudSyncService().backupToCloud(userId);
   }
 }

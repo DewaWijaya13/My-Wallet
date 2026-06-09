@@ -416,6 +416,83 @@ class DatabaseHelper {
     await db.delete('users', where: 'user_id = ?', whereArgs: [userId]);
   }
 
+  // ========================
+  // CLOUD SYNC HELPERS
+  // ========================
+  Future<Map<String, dynamic>> exportUserDataToJson(String userId) async {
+    final db = await database;
+    
+    final userResult = await db.query('users', where: 'user_id = ?', whereArgs: [userId]);
+    final walletsResult = await db.query('wallets', where: 'user_id = ?', whereArgs: [userId]);
+    final transactionsResult = await db.query('transactions', where: 'user_id = ?', whereArgs: [userId]);
+    final schedulesResult = await db.query('schedules', where: 'user_id = ?', whereArgs: [userId]);
+    final reportHistoriesResult = await db.query('report_histories', where: 'user_id = ?', whereArgs: [userId]);
+    
+    // Categories are shared globally, but we can export custom ones if needed. 
+    // Currently, we'll export all categories just in case the new device doesn't have them.
+    final categoriesResult = await db.query('categories');
+
+    return {
+      'users': userResult,
+      'wallets': walletsResult,
+      'transactions': transactionsResult,
+      'schedules': schedulesResult,
+      'report_histories': reportHistoriesResult,
+      'categories': categoriesResult,
+    };
+  }
+
+  Future<void> importUserDataFromJson(String userId, Map<String, dynamic> data) async {
+    final db = await database;
+    
+    await db.transaction((txn) async {
+      // Clear existing data for this user to avoid duplication/conflicts
+      await txn.delete('transactions', where: 'user_id = ?', whereArgs: [userId]);
+      await txn.delete('schedules', where: 'user_id = ?', whereArgs: [userId]);
+      await txn.delete('report_histories', where: 'user_id = ?', whereArgs: [userId]);
+      await txn.delete('wallets', where: 'user_id = ?', whereArgs: [userId]);
+      await txn.delete('users', where: 'user_id = ?', whereArgs: [userId]);
+      // Categories are somewhat global, so we might want to be careful.
+      // Easiest is to use REPLACE or INSERT OR IGNORE for categories.
+
+      if (data['categories'] != null) {
+        for (var cat in data['categories']) {
+          await txn.insert('categories', Map<String, dynamic>.from(cat), conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
+
+      if (data['users'] != null) {
+        for (var u in data['users']) {
+          await txn.insert('users', Map<String, dynamic>.from(u), conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
+
+      if (data['wallets'] != null) {
+        for (var w in data['wallets']) {
+          await txn.insert('wallets', Map<String, dynamic>.from(w), conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
+
+      if (data['transactions'] != null) {
+        for (var t in data['transactions']) {
+          await txn.insert('transactions', Map<String, dynamic>.from(t), conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
+
+      if (data['schedules'] != null) {
+        for (var s in data['schedules']) {
+          await txn.insert('schedules', Map<String, dynamic>.from(s), conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
+
+      if (data['report_histories'] != null) {
+        for (var r in data['report_histories']) {
+          await txn.insert('report_histories', Map<String, dynamic>.from(r), conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
+    });
+  }
+
   Future<void> close() async {
     final db = await database;
     db.close();

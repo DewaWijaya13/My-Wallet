@@ -610,6 +610,60 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  void _showForgotPasswordDialog(BuildContext context) {
+    final emailController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('Lupa Password?', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Masukkan email yang terdaftar untuk menerima tautan reset password.',
+              style: GoogleFonts.inter(fontSize: 14, color: Colors.grey.shade700),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: emailController,
+              decoration: InputDecoration(
+                hintText: 'Email Anda',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Batal', style: GoogleFonts.inter(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF3366FF),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () async {
+              final email = emailController.text.trim();
+              if (email.isNotEmpty) {
+                Navigator.pop(ctx);
+                final userProvider = context.read<UserProvider>();
+                await userProvider.forgotPassword(email);
+                if (mounted) {
+                  _showSnackBar(userProvider.errorMessage ?? 'Proses selesai');
+                }
+              }
+            },
+            child: Text('Kirim', style: GoogleFonts.inter(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _login() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
@@ -773,12 +827,17 @@ class _LoginScreenState extends State<LoginScreen> {
                               letterSpacing: 1.0,
                             ),
                           ),
-                          Text(
-                            'Lupa Password?',
-                            style: GoogleFonts.inter(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                              color: const Color(0xFF3366FF),
+                          GestureDetector(
+                            onTap: () {
+                              _showForgotPasswordDialog(context);
+                            },
+                            child: Text(
+                              'Lupa Password?',
+                              style: GoogleFonts.inter(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF3366FF),
+                              ),
                             ),
                           ),
                         ],
@@ -951,7 +1010,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     children: [
                       GestureDetector(
                         onTap: () {
-                          Navigator.of(context).pushReplacement(
+                          Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => const RegisterScreen(),
                             ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../controllers/wallet_controller.dart';
 import '../models/wallet.dart';
+import '../services/cloud_sync_service.dart';
 
 class WalletProvider extends ChangeNotifier {
   final WalletController _controller = WalletController();
@@ -83,6 +84,9 @@ class WalletProvider extends ChangeNotifier {
         _activeWalletId = newWallet.walletId;
       }
       
+      // -- CLOUD SYNC --
+      CloudSyncService().backupToCloud(userId);
+
       _isLoading = false;
       notifyListeners();
       return true;
@@ -105,6 +109,10 @@ class WalletProvider extends ChangeNotifier {
       if (index != -1) {
         _wallets[index] = wallet;
       }
+
+      // -- CLOUD SYNC --
+      CloudSyncService().backupToCloud(wallet.userId);
+
       _isLoading = false;
       notifyListeners();
       return true;
@@ -122,11 +130,22 @@ class WalletProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      String? userId;
+      if (_wallets.isNotEmpty) {
+        userId = _wallets.firstWhere((w) => w.walletId == walletId).userId;
+      }
+
       await _controller.deleteWallet(walletId);
       _wallets.removeWhere((w) => w.walletId == walletId);
       if (_activeWalletId == walletId) {
         _activeWalletId = _wallets.isNotEmpty ? _wallets.first.walletId : null;
       }
+
+      // -- CLOUD SYNC --
+      if (userId != null) {
+        CloudSyncService().backupToCloud(userId);
+      }
+
       _isLoading = false;
       notifyListeners();
       return true;

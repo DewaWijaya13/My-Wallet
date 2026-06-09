@@ -22,6 +22,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String? _selectedGender;
   DateTime? _selectedDOB;
 
+  bool _isVerificationSent = false;
+  bool _isVerified = false;
+  String? _tempPassword;
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -56,14 +60,53 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
+  void _sendVerification() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      _showSnackBar('Harap isi email terlebih dahulu');
+      return;
+    }
+    final userProvider = context.read<UserProvider>();
+    final tempPassword = await userProvider.sendVerificationEmail(email);
+    if (tempPassword != null) {
+      setState(() {
+        _tempPassword = tempPassword;
+        _isVerificationSent = true;
+      });
+      _showSnackBar(userProvider.errorMessage ?? 'Email verifikasi terkirim!');
+    } else {
+      _showSnackBar(userProvider.errorMessage ?? 'Gagal mengirim verifikasi');
+    }
+  }
+
+  void _checkVerification() async {
+    if (_tempPassword == null) return;
+    final email = _emailController.text.trim();
+    final userProvider = context.read<UserProvider>();
+    final verified = await userProvider.checkEmailVerified(email, _tempPassword!);
+    if (verified) {
+      setState(() {
+        _isVerified = true;
+      });
+      _showSnackBar('Email berhasil diverifikasi!');
+    } else {
+      _showSnackBar(userProvider.errorMessage ?? 'Email belum diverifikasi');
+    }
+  }
+
   void _register() async {
+    if (!_isVerified || _tempPassword == null) {
+      _showSnackBar('Harap verifikasi email terlebih dahulu');
+      return;
+    }
+
     final email = _emailController.text.trim();
     final phone = _phoneController.text.trim();
     final password = _passwordController.text;
     final confirmPassword = _confirmPasswordController.text;
 
-    if (email.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
-      _showSnackBar('Harap isi semua field yang wajib');
+    if (password.isEmpty || confirmPassword.isEmpty) {
+      _showSnackBar('Harap isi password');
       return;
     }
     if (password != confirmPassword) {
@@ -76,10 +119,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
 
     final userProvider = context.read<UserProvider>();
-    final success = await userProvider.register(
-      namaLengkap: email.split('@').first, // Default name from email
+    final success = await userProvider.finalizeRegistration(
+      namaLengkap: email.split('@').first,
       email: email,
-      password: password,
+      tempPassword: _tempPassword!,
+      realPassword: password,
       noHp: phone.isNotEmpty ? phone : null,
       tanggalLahir: _selectedDOB,
       jenisKelamin: _selectedGender,
@@ -87,12 +131,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     if (mounted) {
       if (success) {
+        _showSnackBar('Registrasi Berhasil!');
+        // After successful registration, we are logged in, so go to Dashboard
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const DashboardScreen()),
           (route) => false,
         );
       } else {
-        _showSnackBar(userProvider.errorMessage ?? 'Gagal mendaftar');
+        _showSnackBar(userProvider.errorMessage ?? 'Gagal menyelesaikan pendaftaran');
       }
     }
   }
@@ -182,14 +228,84 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                         const SizedBox(height: 40),
 
-                        // Email field
+                        // Email field & Verification
                         _buildLabel('Email'),
-                        _buildTextField(
-                          controller: _emailController,
-                          icon: Icons.email_outlined,
-                          hint: 'name@example.com',
-                          keyboardType: TextInputType.emailAddress,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: _isVerified ? Colors.green.shade50 : const Color(0xFFF5F6F8),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: _isVerified ? Border.all(color: Colors.green) : null,
+                                ),
+                                child: TextField(
+                                  controller: _emailController,
+                                  enabled: !_isVerified && !_isVerificationSent,
+                                  keyboardType: TextInputType.emailAddress,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 14,
+                                    color: _isVerified ? Colors.green.shade700 : Colors.black87,
+                                  ),
+                                  decoration: InputDecoration(
+                                    border: InputBorder.none,
+                                    prefixIcon: Icon(
+                                      Icons.email_outlined, 
+                                      color: _isVerified ? Colors.green : Colors.grey.shade500, 
+                                      size: 20
+                                    ),
+                                    hintText: 'name@example.com',
+                                    hintStyle: GoogleFonts.inter(
+                                      color: Colors.grey.shade400,
+                                      fontSize: 14,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            if (_isVerified)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade500,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: const Icon(Icons.check_circle, color: Colors.white, size: 24),
+                              )
+                            else if (_isVerificationSent)
+                              ElevatedButton(
+                                onPressed: _checkVerification,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF8B5CF6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  elevation: 0,
+                                ),
+                                child: Text('Cek\nStatus', textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)),
+                              )
+                            else
+                              ElevatedButton(
+                                onPressed: _sendVerification,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF3366FF),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  elevation: 0,
+                                ),
+                                child: Text('Kirim\nVerifikasi', textAlign: TextAlign.center, style: GoogleFonts.inter(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)),
+                              ),
+                          ],
                         ),
+                        if (_isVerificationSent && !_isVerified)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              'Cek kotak masuk email Anda, lalu klik tombol "Cek Status" di atas.',
+                              style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFFE11D48)),
+                            ),
+                          ),
                         const SizedBox(height: 24),
 
                         // No HP field
@@ -199,6 +315,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           icon: Icons.phone_iphone,
                           hint: '+62 812 3456 7890',
                           keyboardType: TextInputType.phone,
+                          enabled: _isVerified,
                         ),
                         const SizedBox(height: 24),
 
@@ -214,7 +331,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   _buildLabel('Jenis Kelamin'),
                                   Container(
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFFF5F6F8),
+                                      color: _isVerified ? const Color(0xFFF5F6F8) : Colors.grey.shade200,
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     padding: const EdgeInsets.symmetric(
@@ -249,11 +366,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                             child: Text('Wanita'),
                                           ),
                                         ],
-                                        onChanged: (val) {
+                                        onChanged: _isVerified ? (val) {
                                           setState(
                                             () => _selectedGender = val,
                                           );
-                                        },
+                                        } : null,
                                       ),
                                     ),
                                   ),
@@ -268,14 +385,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 children: [
                                   _buildLabel('Tanggal Lahir'),
                                   GestureDetector(
-                                    onTap: _pickDate,
+                                    onTap: _isVerified ? _pickDate : null,
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(
                                         horizontal: 16,
                                         vertical: 15,
                                       ),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFF5F6F8),
+                                        color: _isVerified ? const Color(0xFFF5F6F8) : Colors.grey.shade200,
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                       child: Row(
@@ -317,6 +434,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           hint: '••••••••',
                           isPassword: true,
                           obscure: _obscurePassword,
+                          enabled: _isVerified,
                           onToggleObscure: () {
                             setState(
                               () => _obscurePassword = !_obscurePassword,
@@ -333,6 +451,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           hint: '••••••••',
                           isPassword: true,
                           obscure: _obscureConfirmPassword,
+                          enabled: _isVerified,
                           onToggleObscure: () {
                             setState(
                               () =>
@@ -350,16 +469,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               width: double.infinity,
                               height: 56,
                               decoration: BoxDecoration(
-                                gradient: const LinearGradient(
+                                gradient: _isVerified ? const LinearGradient(
                                   colors: [
                                     Color(0xFF3366FF),
                                     Color(0xFF8B5CF6),
                                   ],
                                   begin: Alignment.centerLeft,
                                   end: Alignment.centerRight,
-                                ),
+                                ) : null,
+                                color: !_isVerified ? Colors.grey.shade300 : null,
                                 borderRadius: BorderRadius.circular(28),
-                                boxShadow: [
+                                boxShadow: _isVerified ? [
                                   BoxShadow(
                                     color: const Color(
                                       0xFF3366FF,
@@ -367,10 +487,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                     blurRadius: 12,
                                     offset: const Offset(0, 4),
                                   ),
-                                ],
+                                ] : [],
                               ),
                               child: ElevatedButton(
-                                onPressed: userProvider.isLoading
+                                onPressed: (!_isVerified || userProvider.isLoading)
                                     ? null
                                     : _register,
                                 style: ElevatedButton.styleFrom(
@@ -393,7 +513,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                         'Buat Akun',
                                         style: GoogleFonts.poppins(
                                           fontSize: 16,
-                                          color: Colors.white,
+                                          color: _isVerified ? Colors.white : Colors.grey.shade500,
                                           fontWeight: FontWeight.bold,
                                         ),
                                       ),
@@ -484,19 +604,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
     bool isPassword = false,
     bool obscure = false,
     VoidCallback? onToggleObscure,
+    bool enabled = true,
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F6F8),
+        color: enabled ? const Color(0xFFF5F6F8) : Colors.grey.shade200,
         borderRadius: BorderRadius.circular(12),
       ),
       child: TextField(
         controller: controller,
+        enabled: enabled,
         obscureText: isPassword && obscure,
         keyboardType: keyboardType,
         style: GoogleFonts.inter(
           fontSize: 14,
           letterSpacing: isPassword ? 2.0 : 0,
+          color: enabled ? Colors.black87 : Colors.grey.shade500,
         ),
         decoration: InputDecoration(
           border: InputBorder.none,
@@ -508,7 +631,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     color: Colors.grey.shade500,
                     size: 20,
                   ),
-                  onPressed: onToggleObscure,
+                  onPressed: enabled ? onToggleObscure : null,
                 )
               : null,
           hintText: hint,
