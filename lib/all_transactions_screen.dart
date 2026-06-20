@@ -153,24 +153,25 @@ class AllTransactionsScreen extends StatelessWidget {
                           ],
                         ),
                       ),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Consumer<UserProvider>(
-                            builder: (context, userProvider, _) {
-                              final nominal = userProvider.convert(trx.nominal);
-                              final symbol = userProvider.currency == 'IDR' ? 'Rp ' : '${userProvider.currency} ';
-                              return Text(
-                                '${isPemasukan ? '+' : '-'}$symbol${NumberFormat.currency(locale: 'id', symbol: '', decimalDigits: 0).format(nominal)}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                  color: isPemasukan ? const Color(0xFF10B981) : Colors.black87,
-                                ),
-                              );
-                            },
-                          ),
-                        ],
+                      const SizedBox(width: 8),
+                      Flexible(
+                        flex: 0,
+                        child: Consumer<UserProvider>(
+                          builder: (context, userProvider, _) {
+                            final nominal = userProvider.convert(trx.nominal);
+                            final symbol = userProvider.currency == 'IDR' ? 'Rp ' : '${userProvider.currency} ';
+                            return Text(
+                              '${isPemasukan ? '+' : '-'}$symbol${NumberFormat.currency(locale: 'id', symbol: '', decimalDigits: 0).format(nominal)}',
+                              style: GoogleFonts.inter(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: isPemasukan ? const Color(0xFF10B981) : Colors.black87,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            );
+                          },
+                        ),
                       ),
                     ],
                   ),

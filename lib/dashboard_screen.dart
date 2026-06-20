@@ -21,6 +21,7 @@ import 'main.dart'; // For LoginScreen
 import 'models/transaction.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'models/schedule.dart';
+import 'database/database_helper.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -32,7 +33,6 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   int _bottomNavIndex = 0;
   String _selectedReportPeriod = 'Bulan';
-  bool _isNotificationEnabled = true;
   String? _selectedCategoryFilter; // null = show all
   int _reportOffset = 0; // 0 = current period, -1 = previous, etc.
   late DateTime _currentCalendarMonth;
@@ -44,10 +44,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final now = DateTime.now();
     _currentCalendarMonth = DateTime(now.year, now.month, 1);
     _selectedCalendarDate = DateTime(now.year, now.month, now.day);
-    _loadNotificationSetting();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkWallets();
+      context.read<UserProvider>().checkUnreadNotifications();
     });
   }
 
@@ -78,20 +78,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  Future<void> _loadNotificationSetting() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _isNotificationEnabled = prefs.getBool('is_notification_enabled') ?? true;
-    });
-  }
 
-  Future<void> _toggleNotification(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('is_notification_enabled', value);
-    setState(() {
-      _isNotificationEnabled = value;
-    });
-  }
 
   IconData _getIconData(String iconName) {
     switch (iconName) {
@@ -372,27 +359,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               GestureDetector(
                 onTap: () {
-                  context.read<UserProvider>().setHasUnreadNotifications(false);
                   _showNotificationBottomSheet(context);
                 },
                 child: Stack(
+                  clipBehavior: Clip.none,
                   children: [
                     const Icon(
                       Icons.notifications_none_rounded,
                       color: Color(0xFF3366FF),
                       size: 28,
                     ),
-                    if (context.watch<UserProvider>().hasUnreadNotifications)
+                    if (context.watch<UserProvider>().unreadCount > 0)
                       Positioned(
-                        top: 2,
-                        right: 2,
+                        top: -4,
+                        right: -4,
                         child: Container(
-                          width: 10,
-                          height: 10,
+                          padding: const EdgeInsets.all(2),
                           decoration: BoxDecoration(
                             color: Colors.red,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: const Color(0xFFFAFAFC), width: 2),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFFAFAFC), width: 1.5),
+                          ),
+                          constraints: const BoxConstraints(
+                            minWidth: 16,
+                            minHeight: 16,
+                          ),
+                          child: Text(
+                            '${context.watch<UserProvider>().unreadCount}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
                           ),
                         ),
                       ),
@@ -504,15 +503,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                     children: [
-                                      Text(
-                                        wallet.namaDompet.toUpperCase(),
-                                        style: GoogleFonts.inter(
-                                          color: Colors.white.withOpacity(0.8),
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          letterSpacing: 1.0,
+                                      Expanded(
+                                        child: Text(
+                                          wallet.namaDompet.toUpperCase(),
+                                          style: GoogleFonts.inter(
+                                            color: Colors.white.withOpacity(0.8),
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            letterSpacing: 1.0,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
                                         ),
                                       ),
+                                      const SizedBox(width: 8),
                                       GestureDetector(
                                         onTap: () {
                                           Navigator.push(
@@ -938,12 +942,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         children: [
                           const Icon(Icons.account_balance_wallet, size: 12, color: Color(0xFF3B5BDB)),
                           const SizedBox(width: 6),
-                          Text(
-                            walletProvider.wallets.firstWhere((w) => w.walletId == activeWalletId).namaDompet,
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: const Color(0xFF3B5BDB),
+                          Flexible(
+                            child: Text(
+                              walletProvider.wallets.firstWhere((w) => w.walletId == activeWalletId).namaDompet,
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF3B5BDB),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
                           ),
                         ],
@@ -1007,23 +1015,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),
-              GestureDetector(
-                onTap: () => setState(() => _reportOffset = 0),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: _reportOffset == 0 ? const Color(0xFF3366FF).withOpacity(0.1) : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    _getFormattedPeriod(
-                      reportData['startDate'] as DateTime,
-                      reportData['endDate'] as DateTime,
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => _reportOffset = 0),
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _reportOffset == 0 ? const Color(0xFF3366FF).withOpacity(0.1) : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(16),
                     ),
-                    style: GoogleFonts.inter(
-                      color: _reportOffset == 0 ? const Color(0xFF3366FF) : Colors.grey.shade700,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                    child: Text(
+                      _getFormattedPeriod(
+                        reportData['startDate'] as DateTime,
+                        reportData['endDate'] as DateTime,
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        color: _reportOffset == 0 ? const Color(0xFF3366FF) : Colors.grey.shade700,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ),
@@ -1063,8 +1077,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 12),
           // Income vs Expense summary row
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 12,
+            runSpacing: 8,
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1088,7 +1104,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ],
                 ),
               ),
-              const SizedBox(width: 12),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
@@ -2266,8 +2281,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 );
               } else if (value == 'delete') {
-                final userId = context.read<UserProvider>().userId;
-                context.read<ScheduleProvider>().deleteSchedule(schedule.jadwalId, userId);
+                final userProvider = context.read<UserProvider>();
+                final userId = userProvider.userId;
+                context.read<ScheduleProvider>().deleteSchedule(schedule.jadwalId, userId).then((_) {
+                  userProvider.checkUnreadNotifications();
+                });
               }
             },
             itemBuilder: (context) => [
@@ -2293,58 +2311,73 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.7,
+        ),
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40, height: 4,
-                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text('Jadwal: ${DateFormat('dd MMMM yyyy', 'id').format(date)}', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            ...schedulesForDate.map((schedule) {
-              final cat = schedule.category;
-              IconData icon = Icons.receipt_long;
-              Color iconColor = const Color(0xFF8B5CF6);
-              Color iconBgColor = const Color(0xFFF3E8FF);
-
-              if (cat != null && cat.ikon.isNotEmpty) {
-                icon = CategoryProvider.getIconData(cat.ikon);
-                iconColor = CategoryProvider.parseColor(cat.warna);
-                iconBgColor = CategoryProvider.parseColor(cat.warna).withOpacity(0.15);
-              }
-
-              final isIncome = cat?.tipe == 'income';
-              final amountPrefix = isIncome ? '+' : '-';
-              final amountColor = isIncome ? const Color(0xFF10B981) : Colors.black87;
-
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _buildScheduleItem(
-                  schedule: schedule,
-                  icon: icon,
-                  iconColor: iconColor,
-                  iconBgColor: iconBgColor,
-                  title: schedule.namaTagihan,
-                  date: DateFormat('HH:mm').format(schedule.tanggalJatuhTempo),
-                  amount: '$amountPrefix${_formatCompactCurrency(schedule.nominal)}',
-                  amountColor: amountColor,
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40, height: 4,
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
                 ),
-              );
-            }),
-            const SizedBox(height: 24),
-          ],
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Jadwal: ${DateFormat('dd MMMM yyyy', 'id').format(date)}',
+                style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  child: Column(
+                    children: schedulesForDate.map((schedule) {
+                      final cat = schedule.category;
+                      IconData icon = Icons.receipt_long;
+                      Color iconColor = const Color(0xFF8B5CF6);
+                      Color iconBgColor = const Color(0xFFF3E8FF);
+
+                      if (cat != null && cat.ikon.isNotEmpty) {
+                        icon = CategoryProvider.getIconData(cat.ikon);
+                        iconColor = CategoryProvider.parseColor(cat.warna);
+                        iconBgColor = CategoryProvider.parseColor(cat.warna).withOpacity(0.15);
+                      }
+
+                      final isIncome = cat?.tipe == 'income';
+                      final amountPrefix = isIncome ? '+' : '-';
+                      final amountColor = isIncome ? const Color(0xFF10B981) : Colors.black87;
+
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _buildScheduleItem(
+                          schedule: schedule,
+                          icon: icon,
+                          iconColor: iconColor,
+                          iconBgColor: iconBgColor,
+                          title: schedule.namaTagihan,
+                          date: DateFormat('HH:mm').format(schedule.tanggalJatuhTempo),
+                          amount: '$amountPrefix${_formatCompactCurrency(schedule.nominal)}',
+                          amountColor: amountColor,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2403,8 +2436,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
               GestureDetector(
-                onTap: () => _showNotificationBottomSheet(context),
-                child: const Icon(Icons.notifications_none, color: Color(0xFF3366FF)),
+                onTap: () {
+                  _showNotificationBottomSheet(context);
+                },
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.notifications_none, color: Color(0xFF3366FF), size: 28),
+                    if (context.watch<UserProvider>().unreadCount > 0)
+                      Positioned(
+                        top: -4,
+                        right: -4,
+                        child: Container(
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFFAFAFC), width: 1.5),
+                          ),
+                          constraints: const BoxConstraints(
+                            minWidth: 16,
+                            minHeight: 16,
+                          ),
+                          child: Text(
+                            '${context.watch<UserProvider>().unreadCount}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -2623,14 +2689,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _buildSectionHeader('NOTIFIKASI'),
           _buildSettingsCard(
             children: [
-              _buildSettingsItem(
-                icon: Icons.notifications_active_outlined,
-                iconColor: const Color(0xFF3366FF),
-                title: 'Pengingat Jadwal',
-                trailingWidget: Switch(
-                  value: _isNotificationEnabled,
-                  onChanged: (val) => _toggleNotification(val),
-                  activeColor: const Color(0xFF3366FF),
+              Consumer<UserProvider>(
+                builder: (context, userProvider, _) => _buildSettingsItem(
+                  icon: Icons.notifications_active_outlined,
+                  iconColor: const Color(0xFF3366FF),
+                  title: 'Pengingat Jadwal',
+                  trailingWidget: Switch(
+                    value: userProvider.isNotificationEnabled,
+                    onChanged: (val) async {
+                      await userProvider.toggleNotification(val);
+                      if (context.mounted) {
+                        await context.read<ScheduleProvider>().loadSchedules(userProvider.userId);
+                        if (context.mounted) {
+                          await context.read<UserProvider>().checkUnreadNotifications();
+                        }
+                      }
+                    },
+                    activeColor: const Color(0xFF3366FF),
+                  ),
                 ),
               ),
               const Divider(height: 1, thickness: 1, color: Color(0xFFF3F4F6)),
@@ -2654,6 +2730,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       // Reschedule notifications based on new time
                       if (context.mounted) {
                         await context.read<ScheduleProvider>().loadSchedules(userProvider.userId);
+                        if (context.mounted) {
+                          await context.read<UserProvider>().checkUnreadNotifications();
+                        }
                       }
                     }
                   },
@@ -2998,64 +3077,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _showNotificationBottomSheet(BuildContext context) {
+    final userProvider = Provider.of<UserProvider>(context, listen: false);
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        height: MediaQuery.of(context).size.height * 0.7,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(24),
-            topRight: Radius.circular(24),
-          ),
-        ),
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Notifikasi',
-              style: GoogleFonts.poppins(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-            ),
-            const SizedBox(height: 24),
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.notifications_off_outlined, size: 64, color: Colors.grey.shade300),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Belum ada notifikasi',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        color: Colors.grey.shade500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+      builder: (context) => NotificationBottomSheet(userId: userProvider.userId),
     );
   }
 
@@ -3085,16 +3112,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context); // Close dialog
-              await context.read<UserProvider>().deleteAllData();
-              if (context.mounted) {
-                // Refresh data providers
-                context.read<TransactionProvider>().loadTransactions(context.read<UserProvider>().userId);
-                context.read<ScheduleProvider>().loadSchedules(context.read<UserProvider>().userId);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Data berhasil dihapus')),
-                );
-              }
+              final userProvider = context.read<UserProvider>();
+              final transactionProvider = context.read<TransactionProvider>();
+              final scheduleProvider = context.read<ScheduleProvider>();
+              final scaffoldMessenger = ScaffoldMessenger.of(context);
+              final navigator = Navigator.of(context);
+
+              navigator.pop(); // Close dialog
+              await userProvider.deleteAllData();
+              
+              // Refresh data providers
+              transactionProvider.loadTransactions(userProvider.userId);
+              await scheduleProvider.loadSchedules(userProvider.userId);
+              await userProvider.checkUnreadNotifications();
+              scaffoldMessenger.showSnackBar(
+                const SnackBar(content: Text('Data berhasil dihapus')),
+              );
             },
             child: const Text('Hapus Data', style: TextStyle(color: Colors.red)),
           ),
@@ -3126,6 +3159,283 @@ class _DashboardScreenState extends State<DashboardScreen> {
               }
             },
             child: const Text('Hapus Akun', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class NotificationBottomSheet extends StatefulWidget {
+  final String userId;
+  const NotificationBottomSheet({super.key, required this.userId});
+
+  @override
+  State<NotificationBottomSheet> createState() => _NotificationBottomSheetState();
+}
+
+class _NotificationBottomSheetState extends State<NotificationBottomSheet> {
+  late Future<List<Map<String, dynamic>>> _notificationsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNotifications();
+  }
+
+  void _loadNotifications() {
+    _notificationsFuture = DatabaseHelper.instance.getReceivedNotifications(widget.userId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final userProvider = Provider.of<UserProvider>(context);
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.7,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(24),
+          topRight: Radius.circular(24),
+        ),
+      ),
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Expanded(
+            child: FutureBuilder<List<Map<String, dynamic>>>(
+              future: _notificationsFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                
+                final notifs = snapshot.data ?? [];
+                
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Notifikasi',
+                          style: GoogleFonts.poppins(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        Flexible(
+                          child: Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            alignment: WrapAlignment.end,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              if (userProvider.unreadCount > 0)
+                                TextButton(
+                                  onPressed: () async {
+                                    await userProvider.markAllNotificationsAsRead();
+                                    setState(() {
+                                      _loadNotifications();
+                                    });
+                                  },
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  child: Text(
+                                    'Baca Semua',
+                                    style: GoogleFonts.inter(
+                                      color: const Color(0xFF3366FF),
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                              if (notifs.isNotEmpty)
+                                TextButton(
+                                  onPressed: () async {
+                                    await userProvider.clearAllNotifications();
+                                    setState(() {
+                                      _loadNotifications();
+                                    });
+                                  },
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  child: Text(
+                                    'Hapus Semua',
+                                    style: GoogleFonts.inter(
+                                      color: const Color(0xFFE11D48),
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    Expanded(
+                      child: notifs.isEmpty
+                          ? Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.notifications_off_outlined, size: 64, color: Colors.grey.shade300),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'Belum ada notifikasi',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 14,
+                                      color: Colors.grey.shade500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : ListView.builder(
+                              itemCount: notifs.length,
+                              itemBuilder: (context, index) {
+                                final notif = notifs[index];
+                                final DateTime date = DateTime.parse(notif['tanggal']);
+                                final formattedDate = DateFormat('dd MMM yyyy, HH:mm').format(date);
+                                final isRead = notif['is_read'] == 1;
+                                
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 12),
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: isRead ? Colors.grey.shade50 : const Color(0xFFEEF2FF),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: isRead ? Colors.grey.shade100 : const Color(0xFFC7D2FE)),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: isRead
+                                              ? const Color(0xFF8B5CF6).withOpacity(0.1)
+                                              : const Color(0xFF3366FF).withOpacity(0.1),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(
+                                          Icons.notifications_active_outlined,
+                                          color: isRead ? const Color(0xFF8B5CF6) : const Color(0xFF3366FF),
+                                          size: 20,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: Text(
+                                                    notif['title'] ?? 'Notifikasi',
+                                                    style: GoogleFonts.inter(
+                                                      fontWeight: isRead ? FontWeight.normal : FontWeight.bold,
+                                                      fontSize: 14,
+                                                      color: Colors.black87,
+                                                    ),
+                                                  ),
+                                                ),
+                                                if (!isRead)
+                                                  Container(
+                                                    width: 8,
+                                                    height: 8,
+                                                    decoration: const BoxDecoration(
+                                                      color: Color(0xFF3366FF),
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              notif['body'] ?? '',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 12,
+                                                color: Colors.grey.shade600,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              formattedDate,
+                                              style: GoogleFonts.inter(
+                                                fontSize: 10,
+                                                color: Colors.grey.shade400,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (!isRead)
+                                            IconButton(
+                                              icon: const Icon(Icons.check_circle_outline, color: Color(0xFF3366FF), size: 20),
+                                              onPressed: () async {
+                                                await userProvider.markNotificationAsRead(notif['notification_id']);
+                                                setState(() {
+                                                  _loadNotifications();
+                                                });
+                                              },
+                                              tooltip: 'Tandai sudah dibaca',
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(),
+                                            ),
+                                          const SizedBox(width: 8),
+                                          IconButton(
+                                            icon: const Icon(Icons.delete_outline, color: Colors.black45, size: 20),
+                                            onPressed: () async {
+                                              await userProvider.deleteNotification(notif['notification_id']);
+                                              setState(() {
+                                                _loadNotifications();
+                                              });
+                                            },
+                                            tooltip: 'Hapus',
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                );
+              },
+            ),
           ),
         ],
       ),

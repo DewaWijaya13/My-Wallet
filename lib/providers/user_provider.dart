@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../controllers/auth_controller.dart';
 import '../controllers/profile_controller.dart';
@@ -23,7 +24,10 @@ class UserProvider extends ChangeNotifier {
 
   bool _showCompactNumbers = true;
   String _reminderTime = '08:00';
+  bool _isNotificationEnabled = true;
   bool _hasUnreadNotifications = false;
+  int _unreadCount = 0;
+  Timer? _unreadCheckTimer;
 
   UserModel? get currentUser => _currentUser;
   bool get isLoggedIn => _currentUser != null;
@@ -33,7 +37,9 @@ class UserProvider extends ChangeNotifier {
   String get userId => _currentUser?.userId ?? '';
   bool get showCompactNumbers => _showCompactNumbers;
   String get reminderTime => _reminderTime;
+  bool get isNotificationEnabled => _isNotificationEnabled;
   bool get hasUnreadNotifications => _hasUnreadNotifications;
+  int get unreadCount => _unreadCount;
   
   String get currency => _currency;
   bool get useLiveConversion => _useLiveConversion;
@@ -63,6 +69,7 @@ class UserProvider extends ChangeNotifier {
         _currentUser = await db.getUserByEmail(email) ?? _currentUser;
       } catch (_) {}
 
+      await loadUser(_currentUser!.userId);
       _isLoading = false;
       notifyListeners();
       return true;
@@ -97,6 +104,7 @@ class UserProvider extends ChangeNotifier {
           await cloudSync.restoreFromCloud(_currentUser!.userId);
         } catch (_) {}
 
+        await loadUser(_currentUser!.userId);
         _isLoading = false;
         return true;
       } else {
@@ -182,6 +190,7 @@ class UserProvider extends ChangeNotifier {
         await cloudSync.backupToCloud(_currentUser!.userId);
       } catch (_) {}
 
+      await loadUser(_currentUser!.userId);
       _isLoading = false;
       notifyListeners();
       return true;
@@ -276,10 +285,14 @@ class UserProvider extends ChangeNotifier {
       _useLiveConversion = prefs.getBool('use_live_conversion') ?? false;
       _showCompactNumbers = prefs.getBool('show_compact_numbers') ?? true;
       _reminderTime = prefs.getString('reminder_time') ?? '08:00';
+      _isNotificationEnabled = prefs.getBool('is_notification_enabled') ?? true;
       
       if (_useLiveConversion) {
         await fetchExchangeRates();
       }
+      
+      await checkUnreadNotifications();
+      startUnreadCheckTimer();
       
       // -- AUTO CLOUD SYNC ON START --
       try {
@@ -330,6 +343,7 @@ class UserProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    stopUnreadCheckTimer();
     _currentUser = null;
     _errorMessage = null;
     final prefs = await SharedPreferences.getInstance();
@@ -366,5 +380,74 @@ class UserProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('reminder_time', newTime);
     notifyListeners();
+  }
+
+  Future<void> toggleNotification(bool value) async {
+    _isNotificationEnabled = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_notification_enabled', value);
+    notifyListeners();
+  }
+
+  Future<void> checkUnreadNotifications() async {
+    if (_currentUser == null) return;
+    final db = DatabaseHelper.instance;
+    try {
+      _unreadCount = await db.getUnreadNotificationsCount(_currentUser!.userId);
+      _hasUnreadNotifications = _unreadCount > 0;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('DEBUG NOTIFS ERROR: $e');
+    }
+  }
+
+  Future<void> markNotificationAsRead(String notifId) async {
+    if (_currentUser == null) return;
+    final db = DatabaseHelper.instance;
+    await db.markNotificationAsRead(notifId);
+    await checkUnreadNotifications();
+    CloudSyncService().backupToCloud(_currentUser!.userId);
+  }
+
+  Future<void> markAllNotificationsAsRead() async {
+    if (_currentUser == null) return;
+    final db = DatabaseHelper.instance;
+    await db.markAllNotificationsAsRead(_currentUser!.userId);
+    await checkUnreadNotifications();
+    CloudSyncService().backupToCloud(_currentUser!.userId);
+  }
+
+  void startUnreadCheckTimer() {
+    _unreadCheckTimer?.cancel();
+    _unreadCheckTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      checkUnreadNotifications();
+    });
+  }
+
+  void stopUnreadCheckTimer() {
+    _unreadCheckTimer?.cancel();
+    _unreadCheckTimer = null;
+  }
+
+  Future<void> deleteNotification(String notifId) async {
+    if (_currentUser == null) return;
+    final db = DatabaseHelper.instance;
+    await db.deleteNotification(notifId);
+    await checkUnreadNotifications();
+    CloudSyncService().backupToCloud(_currentUser!.userId);
+  }
+
+  Future<void> clearAllNotifications() async {
+    if (_currentUser == null) return;
+    final db = DatabaseHelper.instance;
+    await db.deleteAllNotifications(_currentUser!.userId);
+    await checkUnreadNotifications();
+    CloudSyncService().backupToCloud(_currentUser!.userId);
+  }
+
+  @override
+  void dispose() {
+    stopUnreadCheckTimer();
+    super.dispose();
   }
 }

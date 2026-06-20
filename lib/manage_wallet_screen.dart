@@ -232,8 +232,9 @@ class _ManageWalletScreenState extends State<ManageWalletScreen> {
               const SizedBox(height: 24),
               Text('Warna Dompet', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
               const SizedBox(height: 8),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
                 children: _availableColors.map((colorHex) {
                   final isSelected = _selectedColor == colorHex;
                   return GestureDetector(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
 import 'providers/schedule_provider.dart';
 import 'providers/user_provider.dart';
 import 'providers/category_provider.dart';
@@ -17,6 +18,7 @@ class AddScheduleScreen extends StatefulWidget {
 
 class _AddScheduleScreenState extends State<AddScheduleScreen> {
   bool _isReminderOn = true;
+  bool _isH1On = true;
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
@@ -28,11 +30,13 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
     super.initState();
     if (widget.existingSchedule != null) {
       final s = widget.existingSchedule!;
-      _amountController.text = s.nominal.toInt().toString();
+      final formatter = NumberFormat.currency(locale: 'id', symbol: '', decimalDigits: 0);
+      _amountController.text = formatter.format(s.nominal);
       _titleController.text = s.namaTagihan;
       _notesController.text = s.catatan ?? '';
       _selectedDate = s.tanggalJatuhTempo;
       _isReminderOn = s.isReminderActive;
+      _isH1On = s.isH1Active;
       _selectedCategoryId = s.kategoriId;
     }
   }
@@ -57,7 +61,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
-          'New Schedule',
+          widget.existingSchedule != null ? 'Ubah Jadwal' : 'Tambah Jadwal',
           style: GoogleFonts.poppins(
             color: Colors.black87,
             fontWeight: FontWeight.w600,
@@ -115,6 +119,10 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                     controller: _amountController,
                     autofocus: true,
                     keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      NumberTextInputFormatter(),
+                    ],
                     style: GoogleFonts.inter(
                       fontSize: 48,
                       fontWeight: FontWeight.w800,
@@ -218,8 +226,108 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                               ),
                             ),
                             const SizedBox(height: 2),
+                            Consumer<UserProvider>(
+                              builder: (context, userProvider, _) {
+                                if (!userProvider.isNotificationEnabled) {
+                                  return Text(
+                                    'Nonaktif (aktifkan di Profil > Pengingat Jadwal)',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      color: const Color(0xFFE11D48),
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  );
+                                }
+                                if (_isReminderOn) {
+                                  if (_isH1On) {
+                                    return Text(
+                                      'H-1 sebelum tanggal jatuh tempo pukul ${userProvider.reminderTime}',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 11,
+                                        color: Colors.grey.shade500,
+                                      ),
+                                    );
+                                  } else {
+                                    return Text(
+                                      'Pada tanggal jatuh tempo pukul ${userProvider.reminderTime}',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 11,
+                                        color: Colors.grey.shade500,
+                                      ),
+                                    );
+                                  }
+                                } else {
+                                  return Text(
+                                    'Pengingat tidak aktif',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade500,
+                                    ),
+                                  );
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: context.watch<UserProvider>().isNotificationEnabled ? _isReminderOn : false,
+                        onChanged: context.watch<UserProvider>().isNotificationEnabled
+                            ? (val) {
+                                setState(() {
+                                  _isReminderOn = val;
+                                });
+                              }
+                            : null,
+                        activeColor: const Color(0xFF3366FF),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // H-1 Toggle Row
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: (context.watch<UserProvider>().isNotificationEnabled && _isReminderOn)
+                              ? const Color(0xFFE0F2FE)
+                              : Colors.grey.shade100,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.history_toggle_off_outlined,
+                          color: (context.watch<UserProvider>().isNotificationEnabled && _isReminderOn)
+                              ? const Color(0xFF0284C7)
+                              : Colors.grey.shade400,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                             Text(
-                              'H-1 sebelum tanggal jatuh tempo',
+                              'Pengingat H-1',
+                              style: GoogleFonts.inter(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: (context.watch<UserProvider>().isNotificationEnabled && _isReminderOn)
+                                    ? Colors.black87
+                                    : Colors.grey.shade400,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              !context.watch<UserProvider>().isNotificationEnabled
+                                  ? 'Pengingat jadwal tidak aktif secara global'
+                                  : !_isReminderOn
+                                      ? 'Pengingat jadwal tidak aktif'
+                                      : _isH1On
+                                          ? 'Diingatkan sehari sebelum tanggal jatuh tempo'
+                                          : 'Diingatkan tepat pada tanggal jatuh tempo',
                               style: GoogleFonts.inter(
                                 fontSize: 11,
                                 color: Colors.grey.shade500,
@@ -229,12 +337,14 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                         ),
                       ),
                       Switch(
-                        value: _isReminderOn,
-                        onChanged: (val) {
-                          setState(() {
-                            _isReminderOn = val;
-                          });
-                        },
+                        value: (context.watch<UserProvider>().isNotificationEnabled && _isReminderOn) ? _isH1On : false,
+                        onChanged: (context.watch<UserProvider>().isNotificationEnabled && _isReminderOn)
+                            ? (val) {
+                                setState(() {
+                                  _isH1On = val;
+                                });
+                              }
+                            : null,
                         activeColor: const Color(0xFF3366FF),
                       ),
                     ],
@@ -267,7 +377,8 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                 ),
                 child: ElevatedButton(
                   onPressed: () {
-                    final amountVal = double.tryParse(_amountController.text) ?? 0;
+                    final amountText = _amountController.text.replaceAll('.', '');
+                    final amountVal = double.tryParse(amountText) ?? 0;
                     final title = _titleController.text.trim();
                     final notes = _notesController.text.trim();
                     if (amountVal <= 0 || title.isEmpty) return;
@@ -287,10 +398,14 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                         updated.kategoriId = _selectedCategoryId!;
                         updated.tanggalJatuhTempo = _selectedDate;
                         updated.isReminderActive = _isReminderOn;
+                        updated.isH1Active = _isH1On;
                         updated.nominal = amountVal;
                         updated.catatan = notes;
                         context.read<ScheduleProvider>().updateSchedule(updated, userId).then((_) {
-                          Navigator.pop(context);
+                          if (context.mounted) {
+                            context.read<UserProvider>().checkUnreadNotifications();
+                            Navigator.pop(context);
+                          }
                         });
                       } else {
                         context.read<ScheduleProvider>().addSchedule(
@@ -299,10 +414,14 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                           kategoriId: _selectedCategoryId!,
                           tanggalJatuhTempo: _selectedDate,
                           isReminderActive: _isReminderOn,
+                          isH1Active: _isH1On,
                           nominal: amountVal,
                           catatan: notes,
                         ).then((_) {
-                          Navigator.pop(context);
+                          if (context.mounted) {
+                            context.read<UserProvider>().checkUnreadNotifications();
+                            Navigator.pop(context);
+                          }
                         });
                       }
                     }
@@ -315,7 +434,7 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
                     ),
                   ),
                   child: Text(
-                    'SIMPAN JADWAL',
+                    widget.existingSchedule != null ? 'UBAH JADWAL' : 'SIMPAN JADWAL',
                     style: GoogleFonts.poppins(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -456,6 +575,34 @@ class _AddScheduleScreenState extends State<AddScheduleScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class NumberTextInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (newValue.text.isEmpty) {
+      return newValue.copyWith(text: '');
+    }
+
+    final int selectionIndexFromRight = newValue.text.length - newValue.selection.end;
+    
+    // Remove all non-digits
+    String text = newValue.text.replaceAll(RegExp(r'\D'), '');
+    if (text.isEmpty) return newValue.copyWith(text: '');
+    
+    final int value = int.parse(text);
+    final String newText = NumberFormat.currency(locale: 'id', symbol: '', decimalDigits: 0).format(value);
+
+    return TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(
+        offset: newText.length - selectionIndexFromRight,
       ),
     );
   }

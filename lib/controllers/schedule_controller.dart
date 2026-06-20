@@ -13,6 +13,7 @@ class ScheduleController {
     required double nominal,
     required DateTime tanggalJatuhTempo,
     bool isReminderActive = true,
+    bool isH1Active = true,
     String? catatan,
   }) async {
     if (nominal <= 0) {
@@ -30,6 +31,7 @@ class ScheduleController {
       nominal: nominal,
       tanggalJatuhTempo: tanggalJatuhTempo,
       isReminderActive: isReminderActive,
+      isH1Active: isH1Active,
       catatan: catatan,
     );
 

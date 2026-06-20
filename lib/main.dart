@@ -26,24 +26,29 @@ import 'package:google_sign_in/google_sign_in.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await initializeDateFormatting('id_ID', null);
-  // Initialize web database factory (no web worker needed)
-  if (kIsWeb) {
-    databaseFactory = databaseFactoryFfiWebNoWebWorker;
+  try {
+    await initializeDateFormatting('id_ID', null);
+    // Initialize web database factory (no web worker needed)
+    if (kIsWeb) {
+      databaseFactory = databaseFactoryFfiWebNoWebWorker;
+    }
+    // Initialize database
+    await DatabaseHelper.instance.database;
+
+    // Initialize Firebase
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+
+    // Initialize Notification Service
+    await NotificationService().init();
+
+    // Initialize Google Sign In
+    await GoogleSignIn.instance.initialize();
+  } catch (e, stackTrace) {
+    debugPrint("CRITICAL STARTUP ERROR: $e");
+    debugPrint("StackTrace: $stackTrace");
   }
-  // Initialize database
-  await DatabaseHelper.instance.database;
-
-  // Initialize Firebase
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-
-  // Initialize Notification Service
-  await NotificationService().init();
-
-  // Initialize Google Sign In
-  await GoogleSignIn.instance.initialize();
 
   runApp(const MyApp());
 }
@@ -99,34 +104,54 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkLoginStatus() async {
-    final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getString('user_id');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('user_id');
 
-    await Future.delayed(const Duration(seconds: 2));
+      await Future.delayed(const Duration(seconds: 2));
 
-    if (!mounted) return;
-
-    if (userId != null && userId.isNotEmpty) {
-      // Auto-login
-      final userProvider = context.read<UserProvider>();
-      await userProvider.loadUser(userId);
-      
       if (!mounted) return;
-      final now = DateTime.now();
-      await context.read<CategoryProvider>().loadCategories();
-      await context.read<TransactionProvider>().loadTransactions(userId);
-      await context.read<TransactionProvider>().loadMonthlySummary(userId, now.month, now.year);
-      await context.read<ScheduleProvider>().loadSchedules(userId);
-      
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const DashboardScreen()),
-      );
-    } else {
-      // Go to onboarding
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const OnboardingScreen()),
-      );
+
+      if (userId != null && userId.isNotEmpty) {
+        // Auto-login
+        final userProvider = context.read<UserProvider>();
+        final categoryProvider = context.read<CategoryProvider>();
+        final transactionProvider = context.read<TransactionProvider>();
+        final scheduleProvider = context.read<ScheduleProvider>();
+
+        await userProvider.loadUser(userId);
+        
+        if (!mounted) return;
+        final now = DateTime.now();
+        await categoryProvider.loadCategories();
+        await transactionProvider.loadTransactions(userId);
+        await transactionProvider.loadMonthlySummary(userId, now.month, now.year);
+        await scheduleProvider.loadSchedules(userId);
+        await userProvider.checkUnreadNotifications();
+        
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+        );
+      } else {
+        // Go to onboarding
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+        );
+      }
+    } catch (e, stackTrace) {
+      debugPrint('Error during auto-login check: $e');
+      debugPrint('StackTrace: $stackTrace');
+      // If error occurs, clear the user session and go to onboarding/login
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('user_id');
+      } catch (_) {}
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+        );
+      }
     }
   }
 
@@ -678,20 +703,25 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (mounted) {
       if (success) {
+        final categoryProvider = context.read<CategoryProvider>();
+        final transactionProvider = context.read<TransactionProvider>();
+        final scheduleProvider = context.read<ScheduleProvider>();
+        final rootUserProvider = context.read<UserProvider>();
+        final navigator = Navigator.of(context);
+
         // Load initial data
         final userId = userProvider.userId;
         final now = DateTime.now();
-        await context.read<CategoryProvider>().loadCategories();
-        await context.read<TransactionProvider>().loadTransactions(userId);
-        await context.read<TransactionProvider>().loadMonthlySummary(userId, now.month, now.year);
-        await context.read<ScheduleProvider>().loadSchedules(userId);
+        await categoryProvider.loadCategories();
+        await transactionProvider.loadTransactions(userId);
+        await transactionProvider.loadMonthlySummary(userId, now.month, now.year);
+        await scheduleProvider.loadSchedules(userId);
+        await rootUserProvider.checkUnreadNotifications();
 
-        if (mounted) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const DashboardScreen()),
-            (route) => false,
-          );
-        }
+        navigator.pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+          (route) => false,
+        );
       } else {
         _showSnackBar(userProvider.errorMessage ?? 'Gagal login');
       }
@@ -950,19 +980,24 @@ class _LoginScreenState extends State<LoginScreen> {
                           onPressed: userProvider.isLoading 
                               ? null 
                               : () async {
+                                  final categoryProvider = context.read<CategoryProvider>();
+                                  final transactionProvider = context.read<TransactionProvider>();
+                                  final scheduleProvider = context.read<ScheduleProvider>();
+                                  final rootUserProvider = context.read<UserProvider>();
+                                  final navigator = Navigator.of(context);
+
                                   final success = await userProvider.loginWithGoogle();
                                   if (success) {
-                                    if (!mounted) return;
                                     // Load initial data for Dashboard
                                     final userId = userProvider.userId;
                                     final now = DateTime.now();
-                                    await context.read<CategoryProvider>().loadCategories();
-                                    await context.read<TransactionProvider>().loadTransactions(userId);
-                                    await context.read<TransactionProvider>().loadMonthlySummary(userId, now.month, now.year);
-                                    await context.read<ScheduleProvider>().loadSchedules(userId);
+                                    await categoryProvider.loadCategories();
+                                    await transactionProvider.loadTransactions(userId);
+                                    await transactionProvider.loadMonthlySummary(userId, now.month, now.year);
+                                    await scheduleProvider.loadSchedules(userId);
+                                    await rootUserProvider.checkUnreadNotifications();
                                     
-                                    if (!mounted) return;
-                                    Navigator.of(context).pushAndRemoveUntil(
+                                    navigator.pushAndRemoveUntil(
                                       MaterialPageRoute(builder: (_) => const DashboardScreen()),
                                       (route) => false,
                                     );

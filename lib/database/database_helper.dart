@@ -21,7 +21,7 @@ class DatabaseHelper {
     // On web, just use the filename directly
     return await openDatabase(
       filePath,
-      version: 4,
+      version: 7,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
     );
@@ -29,30 +29,73 @@ class DatabaseHelper {
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      await db.execute('ALTER TABLE users ADD COLUMN foto_profil TEXT');
+      try {
+        await db.execute('ALTER TABLE users ADD COLUMN foto_profil TEXT');
+      } catch (e) {
+        print("Migration error (foto_profil): $e");
+      }
     }
     if (oldVersion < 3) {
-      await db.execute('ALTER TABLE schedules ADD COLUMN catatan TEXT');
+      try {
+        await db.execute('ALTER TABLE schedules ADD COLUMN catatan TEXT');
+      } catch (e) {
+        print("Migration error (catatan): $e");
+      }
     }
     if (oldVersion < 4) {
-      await db.execute('''
-        CREATE TABLE wallets (
-          wallet_id TEXT PRIMARY KEY,
-          user_id TEXT NOT NULL,
-          nama_dompet TEXT NOT NULL,
-          deskripsi TEXT,
-          warna TEXT NOT NULL,
-          ikon TEXT NOT NULL,
-          saldo_awal REAL DEFAULT 0,
-          tanggal_dibuat TEXT NOT NULL,
-          FOREIGN KEY (user_id) REFERENCES users(user_id)
-        )
-      ''');
-      await db.execute('ALTER TABLE transactions ADD COLUMN wallet_id TEXT');
-      
-      // We will initialize the default wallet for existing users when they login, 
-      // or we can do it here by fetching all users.
-      // Doing it dynamically in app is easier (if user has 0 wallets, create one).
+      try {
+        await db.execute('''
+          CREATE TABLE wallets (
+            wallet_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            nama_dompet TEXT NOT NULL,
+            deskripsi TEXT,
+            warna TEXT NOT NULL,
+            ikon TEXT NOT NULL,
+            saldo_awal REAL DEFAULT 0,
+            tanggal_dibuat TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+          )
+        ''');
+      } catch (e) {
+        print("Migration error (wallets table): $e");
+      }
+      try {
+        await db.execute('ALTER TABLE transactions ADD COLUMN wallet_id TEXT');
+      } catch (e) {
+        print("Migration error (wallet_id column): $e");
+      }
+    }
+    if (oldVersion < 5) {
+      try {
+        await db.execute('''
+          CREATE TABLE notifications (
+            notification_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            tanggal TEXT NOT NULL,
+            is_read INTEGER DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+          )
+        ''');
+      } catch (e) {
+        print("Migration error (notifications table): $e");
+      }
+    }
+    if (oldVersion < 6) {
+      try {
+        await db.execute('ALTER TABLE schedules ADD COLUMN is_h1_active INTEGER DEFAULT 1');
+      } catch (e) {
+        print("Migration error (is_h1_active column): $e");
+      }
+    }
+    if (oldVersion < 7) {
+      try {
+        await db.execute('ALTER TABLE notifications ADD COLUMN is_deleted INTEGER DEFAULT 0');
+      } catch (e) {
+        print("Migration error (is_deleted column): $e");
+      }
     }
   }
 
@@ -137,9 +180,24 @@ class DatabaseHelper {
         nominal REAL NOT NULL,
         tanggal_jatuh_tempo TEXT NOT NULL,
         is_reminder_active INTEGER DEFAULT 1,
+        is_h1_active INTEGER DEFAULT 1,
         catatan TEXT,
         FOREIGN KEY (user_id) REFERENCES users(user_id),
         FOREIGN KEY (kategori_id) REFERENCES categories(kategori_id)
+      )
+    ''');
+
+    // NOTIFICATIONS table
+    await db.execute('''
+      CREATE TABLE notifications (
+        notification_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        tanggal TEXT NOT NULL,
+        is_read INTEGER DEFAULT 0,
+        is_deleted INTEGER DEFAULT 0,
+        FOREIGN KEY (user_id) REFERENCES users(user_id)
       )
     ''');
 
@@ -408,6 +466,7 @@ class DatabaseHelper {
     await db.delete('transactions', where: 'user_id = ?', whereArgs: [userId]);
     await db.delete('schedules', where: 'user_id = ?', whereArgs: [userId]);
     await db.delete('report_histories', where: 'user_id = ?', whereArgs: [userId]);
+    await db.delete('notifications', where: 'user_id = ?', whereArgs: [userId]);
   }
 
   Future<void> deleteAccount(String userId) async {
@@ -427,6 +486,7 @@ class DatabaseHelper {
     final transactionsResult = await db.query('transactions', where: 'user_id = ?', whereArgs: [userId]);
     final schedulesResult = await db.query('schedules', where: 'user_id = ?', whereArgs: [userId]);
     final reportHistoriesResult = await db.query('report_histories', where: 'user_id = ?', whereArgs: [userId]);
+    final notificationsResult = await db.query('notifications', where: 'user_id = ?', whereArgs: [userId]);
     
     // Categories are shared globally, but we can export custom ones if needed. 
     // Currently, we'll export all categories just in case the new device doesn't have them.
@@ -439,6 +499,7 @@ class DatabaseHelper {
       'schedules': schedulesResult,
       'report_histories': reportHistoriesResult,
       'categories': categoriesResult,
+      'notifications': notificationsResult,
     };
   }
 
@@ -452,6 +513,7 @@ class DatabaseHelper {
       await txn.delete('report_histories', where: 'user_id = ?', whereArgs: [userId]);
       await txn.delete('wallets', where: 'user_id = ?', whereArgs: [userId]);
       await txn.delete('users', where: 'user_id = ?', whereArgs: [userId]);
+      await txn.delete('notifications', where: 'user_id = ?', whereArgs: [userId]);
       // Categories are somewhat global, so we might want to be careful.
       // Easiest is to use REPLACE or INSERT OR IGNORE for categories.
 
@@ -490,7 +552,125 @@ class DatabaseHelper {
           await txn.insert('report_histories', Map<String, dynamic>.from(r), conflictAlgorithm: ConflictAlgorithm.replace);
         }
       }
+
+      if (data['notifications'] != null) {
+        for (var n in data['notifications']) {
+          await txn.insert('notifications', Map<String, dynamic>.from(n), conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
     });
+  }
+
+  // ========================
+  // NOTIFICATIONS CRUD
+  // ========================
+  Future<int> insertNotification(String notifId, String userId, String title, String body, String tanggal) async {
+    final db = await database;
+    final existing = await db.query(
+      'notifications',
+      where: 'notification_id = ?',
+      whereArgs: [notifId],
+    );
+    if (existing.isNotEmpty) {
+      return await db.update(
+        'notifications',
+        {
+          'title': title,
+          'body': body,
+          'tanggal': tanggal,
+        },
+        where: 'notification_id = ?',
+        whereArgs: [notifId],
+      );
+    } else {
+      return await db.insert(
+        'notifications',
+        {
+          'notification_id': notifId,
+          'user_id': userId,
+          'title': title,
+          'body': body,
+          'tanggal': tanggal,
+          'is_read': 0,
+          'is_deleted': 0,
+        },
+      );
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getReceivedNotifications(String userId) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    return await db.query(
+      'notifications',
+      where: 'user_id = ? AND tanggal <= ? AND is_deleted = 0',
+      whereArgs: [userId, now],
+      orderBy: 'tanggal DESC',
+    );
+  }
+
+  Future<bool> hasUnreadNotifications(String userId) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final result = await db.rawQuery('''
+      SELECT COUNT(*) as count 
+      FROM notifications 
+      WHERE user_id = ? AND tanggal <= ? AND is_read = 0 AND is_deleted = 0
+    ''', [userId, now]);
+    return (Sqflite.firstIntValue(result) ?? 0) > 0;
+  }
+
+  Future<int> getUnreadNotificationsCount(String userId) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final result = await db.rawQuery('''
+      SELECT COUNT(*) as count 
+      FROM notifications 
+      WHERE user_id = ? AND tanggal <= ? AND is_read = 0 AND is_deleted = 0
+    ''', [userId, now]);
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  Future<void> markNotificationAsRead(String notifId) async {
+    final db = await database;
+    await db.update(
+      'notifications',
+      {'is_read': 1},
+      where: 'notification_id = ?',
+      whereArgs: [notifId],
+    );
+  }
+
+  Future<void> markAllNotificationsAsRead(String userId) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    await db.update(
+      'notifications',
+      {'is_read': 1},
+      where: 'user_id = ? AND tanggal <= ? AND is_deleted = 0',
+      whereArgs: [userId, now],
+    );
+  }
+
+  Future<int> deleteNotification(String notifId) async {
+    final db = await database;
+    return await db.update(
+      'notifications',
+      {'is_deleted': 1},
+      where: 'notification_id = ?',
+      whereArgs: [notifId],
+    );
+  }
+
+  Future<int> deleteAllNotifications(String userId) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    return await db.update(
+      'notifications',
+      {'is_deleted': 1},
+      where: 'user_id = ? AND tanggal <= ?',
+      whereArgs: [userId, now],
+    );
   }
 
   Future<void> close() async {

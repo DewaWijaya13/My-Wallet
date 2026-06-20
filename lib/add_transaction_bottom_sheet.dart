@@ -19,6 +19,8 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
   bool isPemasukan = false;
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
+  final FocusNode _notesFocusNode = FocusNode();
+  final ScrollController _scrollController = ScrollController();
   DateTime _selectedDate = DateTime.now();
   int? _selectedCategoryId;
   String? _selectedWalletId;
@@ -26,6 +28,7 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
   @override
   void initState() {
     super.initState();
+    _notesFocusNode.addListener(_scrollToBottom);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final walletProvider = context.read<WalletProvider>();
       if (walletProvider.wallets.isNotEmpty) {
@@ -36,25 +39,45 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
     });
   }
 
+  void _scrollToBottom() {
+    if (_notesFocusNode.hasFocus) {
+      Future.delayed(const Duration(milliseconds: 200), () {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+  }
+
   @override
   void dispose() {
     _amountController.dispose();
     _notesController.dispose();
+    _notesFocusNode.removeListener(_scrollToBottom);
+    _notesFocusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-      ),
-      child: SafeArea(
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-            child: Column(
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+              child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -423,6 +446,7 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
                       Expanded(
                         child: TextField(
                           controller: _notesController,
+                          focusNode: _notesFocusNode,
                           decoration: InputDecoration(
                             border: InputBorder.none,
                             labelText: 'CATATAN',
@@ -523,8 +547,9 @@ class _AddTransactionBottomSheetState extends State<AddTransactionBottomSheet> {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class NumberTextInputFormatter extends TextInputFormatter {
